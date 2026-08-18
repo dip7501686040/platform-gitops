@@ -1,0 +1,13 @@
+image:
+  # TODO: replace with the real ECR URL once real-AWS Terraform is applied
+  # (see terraform outputs.ecr_repository_urls).
+  repository: REPLACE_WITH_REAL_ECR_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/ai-notification/rule-engine-service
+  tag: unset
+
+healthGrpcPort: 50056
+appGrpcPort: 50156
+appGrpcPortEnvName: RULE_ENGINE_GRPC_PORT
+
+database:
+  enabled: true
+  name: rule_engine_db

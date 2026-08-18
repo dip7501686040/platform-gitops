@@ -1,0 +1,11 @@
+image:
+  repository: ai-notification/rule-engine-service
+  tag: dev
+
+healthGrpcPort: 50056
+appGrpcPort: 50156
+appGrpcPortEnvName: RULE_ENGINE_GRPC_PORT
+
+database:
+  enabled: true
+  name: rule_engine_db

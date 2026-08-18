@@ -1,0 +1,52 @@
+# One ApplicationSet (list generator) covering all 11 NestJS services, since
+# they share the same chart (k8s/charts/nest-service) and only differ
+# by which per-service values file gets layered on top. Targets the local
+# environment specifically — a parallel nest-services-prod.yaml (pointing at
+# k8s/environments/prod/ and a real cluster destination) is the prod
+# equivalent, added once the real cluster exists.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: nest-services-local
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - service: api-gateway
+          - service: identity-service
+          - service: tenant-service
+          - service: event-service
+          - service: ai-service
+          - service: rule-engine-service
+          - service: notification-service
+          - service: channel-service
+          - service: template-service
+          - service: analytics-service
+          - service: audit-service
+  template:
+    metadata:
+      name: "{{service}}"
+      namespace: argocd
+    spec:
+      project: default
+      sources:
+        - repoURL: https://github.com/dip7501686040/platform-gitops.git
+          targetRevision: main
+          path: k8s/charts/nest-service
+          helm:
+            releaseName: "{{service}}"
+            valueFiles:
+              - $values/k8s/environments/local/values-{{service}}.yaml
+        - repoURL: https://github.com/dip7501686040/platform-gitops.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: ai-notification
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

@@ -1,0 +1,11 @@
+image:
+  repository: ai-notification/analytics-service
+  tag: dev
+
+healthGrpcPort: 50060
+appGrpcPort: 50160
+appGrpcPortEnvName: ANALYTICS_GRPC_PORT
+
+database:
+  enabled: true
+  name: analytics_db

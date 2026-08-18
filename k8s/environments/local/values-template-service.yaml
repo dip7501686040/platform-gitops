@@ -1,0 +1,11 @@
+image:
+  repository: ai-notification/template-service
+  tag: dev
+
+healthGrpcPort: 50059
+appGrpcPort: 50159
+appGrpcPortEnvName: TEMPLATE_GRPC_PORT
+
+database:
+  enabled: true
+  name: template_db

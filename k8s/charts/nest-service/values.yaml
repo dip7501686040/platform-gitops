@@ -1,0 +1,42 @@
+# Defaults, overridden per-service via k8s/environments/<env>/values-<service>.yaml
+
+image:
+  repository: "" # required: ECR repo URL (AWS) or local image name (Floci)
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Every service exposes a standard grpc.health.v1.Health server on this port
+# (see packages/grpc/src/health-microservice.ts) — used for k8s probes.
+healthGrpcPort: 50051
+
+# Optional application-facing gRPC port + the env var name the app reads it
+# from (e.g. AUTH_GRPC_PORT). Leave appGrpcPort null for pure-HTTP
+# (api-gateway) or pure-worker (channel-service) services.
+appGrpcPort: null
+appGrpcPortEnvName: ""
+
+# Optional HTTP port (api-gateway only among the nest-service instances).
+httpPort: null
+httpHealthPath: /health
+
+# Shared Postgres DB this service owns, if any (see the ai-notification-system repo's infra/postgres/init.sql
+# for the full list of per-service logical databases).
+database:
+  enabled: false
+  name: ""
+
+postgresHost: postgres
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# Arbitrary extra non-secret env vars specific to this service, e.g.
+# downstream *_GRPC_ADDRESS values (rendered as literal strings).
+env: {}

@@ -1,0 +1,62 @@
+import jenkins.model.*
+import hudson.model.*
+import org.jenkinsci.plugins.workflow.job.WorkflowJob
+import org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition
+import hudson.plugins.git.GitSCM
+import hudson.plugins.git.UserRemoteConfig
+import hudson.plugins.git.BranchSpec
+
+def jenkins = Jenkins.get()
+def repoUrl = "${git_repo_url}"
+def branch = "${git_branch}"
+def services = [${services_groovy_list}]
+
+def makeScm = {
+  // credentialsId null: platform-gitops is public, anonymous clone is fine
+  // for read. Only the tag-bump push (see Jenkinsfile) needs the
+  // github-push credential.
+  new GitSCM(
+    [new UserRemoteConfig(repoUrl, null, null, null)],
+    [new BranchSpec("*/" + branch)],
+    false, [],
+    null, null, []
+  )
+}
+
+def createOrUpdateJob = { name, description, paramsDef ->
+  def job = jenkins.getItem(name)
+  if (job == null) {
+    job = jenkins.createProject(WorkflowJob.class, name)
+  }
+  job.setDescription(description)
+  def flowDef = new CpsScmFlowDefinition(makeScm(), "jenkins/Jenkinsfile")
+  flowDef.setLightweight(true)
+  job.setDefinition(flowDef)
+  if (paramsDef != null) {
+    job.removeProperty(ParametersDefinitionProperty.class)
+    job.addProperty(paramsDef)
+  }
+  job.save()
+}
+
+// Generic/manual-override job — SERVICES accepts a comma-separated list
+// or "all", nothing pinned.
+createOrUpdateJob(
+  "build-service",
+  "CI: build/push any service(s) and bump image tags in git. Generic/manual-override job — for a pre-ready single-click build of one specific service, use the build-<service> jobs instead.",
+  null
+)
+
+// One pre-ready, one-click job per service — same Jenkinsfile/repo/branch,
+// differing only in a pinned SERVICES default so no parameters need
+// typing. Regenerated from var.service_names every apply.
+services.each { svc ->
+  def params = new ParametersDefinitionProperty([
+    new ChoiceParameterDefinition("ENVIRONMENT", ["local", "prod"] as String[], "Which k8s/environments/<env> to update"),
+    new StringParameterDefinition("SERVICES", svc, "Pinned to " + svc + " — override only for an ad-hoc different run"),
+    new StringParameterDefinition("WEB_API_URL", "", "Overrides web's NEXT_PUBLIC_API_URL build-arg"),
+  ])
+  createOrUpdateJob("build-" + svc, "CI: build/push " + svc + " and bump its image tag in git", params)
+}
+
+jenkins.save()

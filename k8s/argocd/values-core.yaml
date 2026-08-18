@@ -1,0 +1,45 @@
+# Lightweight ArgoCD install for resource-constrained dev machines: disables
+# the components this project's single-repo, single-cluster GitOps setup
+# doesn't need (SSO/dex, notifications). Note: this chart version has no
+# toggle to disable the ApplicationSet controller — it always runs, but it's
+# a single small pod.
+
+dex:
+  enabled: false
+
+notifications:
+  enabled: false
+
+redis:
+  enabled: true
+
+controller:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+server:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  # No Ingress/LoadBalancer in this dev setup — reach the UI via
+  # `kubectl port-forward svc/argocd-server -n argocd 8080:443`.
+  service:
+    type: ClusterIP

@@ -1,0 +1,9 @@
+image:
+  repository: ai-notification/api-gateway
+  tag: dev
+
+healthGrpcPort: 50051
+httpPort: 8000
+
+database:
+  enabled: false

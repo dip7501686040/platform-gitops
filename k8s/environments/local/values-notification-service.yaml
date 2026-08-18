@@ -1,0 +1,11 @@
+image:
+  repository: ai-notification/notification-service
+  tag: dev
+
+healthGrpcPort: 50057
+appGrpcPort: 50157
+appGrpcPortEnvName: NOTIFICATION_GRPC_PORT
+
+database:
+  enabled: true
+  name: notification_db

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: nest-service
+description: Generic chart for the ai-notification-system NestJS gRPC/HTTP microservices
+type: application
+version: 0.1.0

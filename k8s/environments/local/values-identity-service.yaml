@@ -1,0 +1,11 @@
+image:
+  repository: 172.17.0.3:5000/ai-notification/identity-service
+  tag: "cec58bea"
+
+healthGrpcPort: 50052
+appGrpcPort: 50152
+appGrpcPortEnvName: AUTH_GRPC_PORT
+
+database:
+  enabled: true
+  name: identity_db

@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prediction-service
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/dip7501686040/platform-gitops.git
+      targetRevision: main
+      path: k8s/charts/prediction-service
+      helm:
+        releaseName: prediction-service
+        valueFiles:
+          - $values/k8s/environments/local/values-prediction-service.yaml
+    - repoURL: https://github.com/dip7501686040/platform-gitops.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-notification
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

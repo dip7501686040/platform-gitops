@@ -1,0 +1,5 @@
+apiVersion: v2
+name: web
+description: Next.js frontend for ai-notification-system
+type: application
+version: 0.1.0

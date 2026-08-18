@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backing-services
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dip7501686040/platform-gitops.git
+    targetRevision: main
+    path: k8s/charts/backing-services
+    # local uses chart defaults (cluster-default local-path StorageClass).
+    # For prod, override at apply time with:
+    #   -f k8s/environments/prod/values-backing-services.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-notification
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

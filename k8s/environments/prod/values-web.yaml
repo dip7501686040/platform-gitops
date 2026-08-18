@@ -1,0 +1,5 @@
+image:
+  # TODO: replace with the real ECR URL once real-AWS Terraform is applied
+  # (see terraform outputs.ecr_repository_urls).
+  repository: REPLACE_WITH_REAL_ECR_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/ai-notification/web
+  tag: unset

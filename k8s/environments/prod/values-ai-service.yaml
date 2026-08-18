@@ -1,0 +1,13 @@
+image:
+  # TODO: replace with the real ECR URL once real-AWS Terraform is applied
+  # (see terraform outputs.ecr_repository_urls).
+  repository: REPLACE_WITH_REAL_ECR_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/ai-notification/ai-service
+  tag: unset
+
+healthGrpcPort: 50055
+appGrpcPort: 50155
+appGrpcPortEnvName: AI_GRPC_PORT
+
+database:
+  enabled: true
+  name: ai_db

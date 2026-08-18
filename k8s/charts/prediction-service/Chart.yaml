@@ -1,0 +1,5 @@
+apiVersion: v2
+name: prediction-service
+description: Python/FastAPI prediction service for ai-notification-system
+type: application
+version: 0.1.0

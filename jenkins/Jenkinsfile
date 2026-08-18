@@ -1,0 +1,218 @@
+// CI only — checks out the ai-notification-system source repo, builds and
+// pushes images, then bumps each service's image.tag in
+// k8s/environments/<env>/values-<service>.yaml (in *this* repo,
+// platform-gitops) and pushes that commit. ArgoCD's existing auto-sync (see
+// k8s/argocd) picks up the change and does the actual deploy — this
+// pipeline never touches the cluster directly.
+//
+// Two repos, two roles: this Jenkinsfile lives in platform-gitops (deploy
+// config — Terraform, Helm/k8s, ArgoCD, this pipeline), which is also the
+// SCM Jenkins implicitly checks out as the job workspace. The source repo
+// (application code) is checked out separately, into src/, purely to get
+// code and Dockerfiles for the image builds. Both repos are public; the
+// split is about keeping deploy concerns out of the app repo, not access
+// control — see the tag-bump push step below for the one place that still
+// needs a credential (write access).
+//
+// Concurrency is capped at 2 by construction: SERVICE_CATALOG is processed
+// in batches of at most 2, run sequentially, one `parallel` block per
+// batch — not a plugin-based throttle, to avoid adding another external
+// Jenkins dependency.
+
+def SOURCE_REPO_URL = 'https://github.com/dip7501686040/ai-notification-system.git'
+def SOURCE_BRANCH = 'main'
+
+def SERVICE_CATALOG = [
+  'identity-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/identity-service', APP_DIR: 'identity-service'],
+  ],
+  'tenant-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/tenant-service', APP_DIR: 'tenant-service'],
+  ],
+  'event-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/event-service', APP_DIR: 'event-service'],
+  ],
+  'rule-engine-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/rule-engine-service', APP_DIR: 'rule-engine-service'],
+  ],
+  'template-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/template-service', APP_DIR: 'template-service'],
+  ],
+  'notification-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/notification-service', APP_DIR: 'notification-service'],
+  ],
+  'channel-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/channel-service', APP_DIR: 'channel-service'],
+  ],
+  'ai-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/ai-service', APP_DIR: 'ai-service'],
+  ],
+  'analytics-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/analytics-service', APP_DIR: 'analytics-service'],
+  ],
+  'audit-service': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/audit-service', APP_DIR: 'audit-service'],
+  ],
+  'api-gateway': [
+    dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
+    buildArgs: [APP_NAME: '@ai-notification/api-gateway', APP_DIR: 'api-gateway'],
+  ],
+  // web is deliberately last in the batch order below — its
+  // NEXT_PUBLIC_API_URL build-arg is baked in at image build time and
+  // should point at api-gateway's real external URL once one exists.
+  'web': [
+    dockerfile: 'src/docker/web-service.Dockerfile', context: 'src',
+    buildArgs: [NEXT_PUBLIC_API_URL: params.WEB_API_URL ?: 'http://localhost:8000'],
+  ],
+  'prediction-service': [
+    dockerfile: 'src/apps/prediction-service/Dockerfile', context: 'src/apps/prediction-service',
+    buildArgs: [:],
+  ],
+]
+
+// Pairs of at most 2, no service depends on another's build finishing
+// first (image builds are independent — this ordering just keeps the
+// same overall sequence as the original rollout plan, not a hard
+// requirement for CI itself).
+def BATCHES = [
+  ['identity-service', 'tenant-service'],
+  ['event-service', 'rule-engine-service'],
+  ['template-service', 'notification-service'],
+  ['channel-service', 'ai-service'],
+  ['analytics-service', 'audit-service'],
+  ['api-gateway', 'web'],
+  ['prediction-service'],
+]
+
+pipeline {
+  agent any
+
+  parameters {
+    choice(name: 'ENVIRONMENT', choices: ['local', 'prod'], description: 'Which k8s/environments/<env> to update')
+    string(name: 'SERVICES', defaultValue: 'identity-service', description: 'Comma-separated service names, or "all"')
+    string(name: 'WEB_API_URL', defaultValue: '', description: 'Overrides web\'s NEXT_PUBLIC_API_URL build-arg')
+  }
+
+  stages {
+    stage('Checkout source repo') {
+      steps {
+        // Public repo — anonymous clone, no credential needed for read.
+        dir('src') {
+          git branch: SOURCE_BRANCH, url: SOURCE_REPO_URL
+        }
+      }
+    }
+
+    stage('Load environment') {
+      steps {
+        // Plain shell parsing rather than the readProperties step, to avoid
+        // needing the pipeline-utility-steps plugin on top of the minimal
+        // plugin set (Pipeline, Git, Credentials Binding) this setup needs.
+        script {
+          def propsFile = "jenkins/env/${params.ENVIRONMENT}.properties"
+          env.AWS_REGION   = sh(script: "grep '^AWS_REGION='   ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.ECR_REGISTRY = sh(script: "grep '^ECR_REGISTRY=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.K8S_ENV       = sh(script: "grep '^K8S_ENV='      ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          // The image tag must track the *source* repo's commit, not this
+          // (platform-gitops) repo's — GIT_COMMIT here would be the latter.
+          env.GIT_SHA = sh(script: "git -C src rev-parse --short=8 HEAD", returnStdout: true).trim()
+        }
+        // Local (not --global) repo config, set once — needed by every git
+        // operation that creates a commit, including the rebase replay in
+        // the push-retry loop below, not just the explicit `git commit`
+        // call (confirmed: a per-command `-c user.name=...` on just the
+        // commit step left `git rebase` with no identity when a concurrent
+        // push forced a retry, failing with "unable to auto-detect email").
+        sh '''
+          git config user.name jenkins
+          git config user.email jenkins@ai-notification.local
+        '''
+      }
+    }
+
+    stage('ECR login') {
+      steps {
+        sh 'aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"'
+      }
+    }
+
+    stage('Build + push (batched, max 2 parallel)') {
+      steps {
+        script {
+          def requested = params.SERVICES.trim() == 'all'
+            ? SERVICE_CATALOG.keySet()
+            : params.SERVICES.split(',').collect { it.trim() }
+
+          for (batch in BATCHES) {
+            def toBuild = batch.findAll { requested.contains(it) }
+            if (toBuild.isEmpty()) {
+              continue
+            }
+
+            def branches = [:]
+            for (svc in toBuild) {
+              def name = svc
+              def cfg = SERVICE_CATALOG[name]
+              branches[name] = {
+                def image = "${env.ECR_REGISTRY}/${name}:${env.GIT_SHA}"
+                def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg ${k}='${v}'" }.join(' ')
+                sh """
+                  docker build -f ${cfg.dockerfile} ${buildArgFlags} -t ${image} ${cfg.context}
+                  docker push ${image}
+                """
+                def valuesFile = "k8s/environments/${env.K8S_ENV}/values-${name}.yaml"
+                sh """
+                  sed -i "s|^\\(\\s*repository:\\).*|\\1 ${env.ECR_REGISTRY}/${name}|" ${valuesFile}
+                  sed -i "s|^\\(\\s*tag:\\).*|\\1 \\"${env.GIT_SHA}\\"|" ${valuesFile}
+                """
+              }
+            }
+            parallel branches
+
+            sh """
+              git add ${toBuild.collect { "k8s/environments/${env.K8S_ENV}/values-${it}.yaml" }.join(' ')}
+              git commit -m "ci: bump image tag for ${toBuild.join(', ')} to \${GIT_SHA}"
+            """
+          }
+        }
+      }
+    }
+
+    stage('Push tag-bump commits') {
+      steps {
+        // github-push credential is seeded automatically into the instance's
+        // credential store at boot (see terraform/modules/jenkins-ec2's
+        // init.groovy.d script) — nothing manual needed here.
+        //
+        // Rebase-and-retry rather than a bare push: this branch can move
+        // between checkout and push (another build, or a human pushing
+        // directly), so a bare push racing that would fail outright.
+        withCredentials([usernamePassword(credentialsId: 'github-push', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
+          sh '''
+            REMOTE="https://${GIT_USER}:${GIT_TOKEN}@github.com/dip7501686040/platform-gitops.git"
+            for attempt in 1 2 3 4 5; do
+              if git push "$REMOTE" HEAD:main; then
+                exit 0
+              fi
+              echo "push rejected (attempt $attempt) — rebasing onto latest main and retrying"
+              git fetch "$REMOTE" main
+              git rebase FETCH_HEAD
+            done
+            echo "push still failing after 5 attempts"
+            exit 1
+          '''
+        }
+      }
+    }
+  }
+}
