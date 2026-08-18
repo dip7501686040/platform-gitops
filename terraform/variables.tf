@@ -3,6 +3,12 @@ variable "aws_region" {
   type        = string
 }
 
+variable "manage_floci" {
+  description = "Run the Floci AWS-emulator container via the docker provider (module.floci) and make every AWS-provider resource wait on it. true for the local/Floci pass, false for real AWS."
+  type        = bool
+  default     = false
+}
+
 variable "cluster_name" {
   description = "Name of the EKS cluster"
   type        = string
@@ -64,6 +70,12 @@ variable "enable_irsa_addons" {
   EOT
   type        = bool
   default     = false
+}
+
+variable "jenkins_local_tunnel_port" {
+  description = "Local Mac port for a Terraform-managed SSH tunnel to the Jenkins EC2 instance's port 8080. 0 disables it (default) — leave disabled on any box that isn't a human's dev machine."
+  type        = number
+  default     = 0
 }
 
 variable "jenkins_mode" {

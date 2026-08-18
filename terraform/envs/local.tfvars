@@ -7,6 +7,10 @@ aws_region   = "us-east-1"
 cluster_name = "ai-notification-floci"
 k8s_version  = "1.31"
 
+# Terraform starts (and, if missing, pulls) the floci/floci container itself
+# via module.floci — no manual `docker run` needed before `terraform apply`.
+manage_floci = true
+
 vpc_cidr           = "10.0.0.0/16"
 az_count           = 2
 single_nat_gateway = true
@@ -28,6 +32,10 @@ jenkins_mode          = "ec2"
 jenkins_instance_type = "t3.medium"
 # Disposable local-only pass — open is fine here, never for the AWS env.
 jenkins_admin_cidr = "0.0.0.0/0"
+
+# Browser access via a Terraform-managed SSH tunnel — see jenkins_ssh_tunnel
+# in main.tf. http://localhost:8091 once applied.
+jenkins_local_tunnel_port = 8091
 
 tags = {
   Project     = "ai-notification-system"

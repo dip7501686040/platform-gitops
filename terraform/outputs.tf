@@ -35,9 +35,17 @@ output "jenkins_ssh_key_path" {
 }
 
 output "jenkins_ssh_command" {
-  value = var.jenkins_mode == "ec2" ? "ssh -i ${module.jenkins_ec2[0].ssh_private_key_path} ec2-user@${module.jenkins_ec2[0].public_ip}" : null
+  # Floci's emulated instance only has root (no ec2-user — see the
+  # jenkins_ssh_tunnel provisioner's comment in main.tf), and its real SSH
+  # port is a Docker-published one, not literally 22 — find it with
+  # `docker port floci-ec2-<instance-id> 22` and pass `-p <that>`.
+  value = var.jenkins_mode == "ec2" ? "ssh -i ${module.jenkins_ec2[0].ssh_private_key_path} ${var.manage_floci ? "root" : "ec2-user"}@${module.jenkins_ec2[0].public_ip}" : null
 }
 
 output "jenkins_admin_password_path" {
   value = var.jenkins_mode == "ec2" ? module.jenkins_ec2[0].admin_password_path : null
+}
+
+output "jenkins_url" {
+  value = var.jenkins_local_tunnel_port > 0 ? "http://localhost:${var.jenkins_local_tunnel_port}" : null
 }

@@ -23,13 +23,13 @@ def makeScm = {
   )
 }
 
-def createOrUpdateJob = { name, description, paramsDef ->
+def createOrUpdateJob = { name, description, paramsDef, scriptPath = "jenkins/Jenkinsfile" ->
   def job = jenkins.getItem(name)
   if (job == null) {
     job = jenkins.createProject(WorkflowJob.class, name)
   }
   job.setDescription(description)
-  def flowDef = new CpsScmFlowDefinition(makeScm(), "jenkins/Jenkinsfile")
+  def flowDef = new CpsScmFlowDefinition(makeScm(), scriptPath)
   flowDef.setLightweight(true)
   job.setDefinition(flowDef)
   if (paramsDef != null) {
@@ -37,6 +37,7 @@ def createOrUpdateJob = { name, description, paramsDef ->
     job.addProperty(paramsDef)
   }
   job.save()
+  return job
 }
 
 // Generic/manual-override job — SERVICES accepts a comma-separated list
@@ -58,5 +59,20 @@ services.each { svc ->
   ])
   createOrUpdateJob("build-" + svc, "CI: build/push " + svc + " and bump its image tag in git", params)
 }
+
+// Polls ai-notification-system's main branch and builds only the
+// apps/<service>/ dirs that actually changed, one at a time — see
+// jenkins/watch-source.Jenkinsfile. Its declarative triggers{cron(...)}
+// block only registers after this job's first run (standard Jenkins
+// behavior for pipeline-defined triggers) — click "Build Now" once after
+// this is seeded; it self-schedules from then on.
+createOrUpdateJob(
+  "watch-source-and-build",
+  "CI: polls ai-notification-system main, builds only the service(s) that actually changed, one at a time. Run once manually after first seeding to register its poll schedule.",
+  new ParametersDefinitionProperty([
+    new ChoiceParameterDefinition("ENVIRONMENT", ["local", "prod"] as String[], "Which environment build-<service> should deploy to"),
+  ]),
+  "jenkins/watch-source.Jenkinsfile"
+)
 
 jenkins.save()

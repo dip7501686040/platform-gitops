@@ -155,4 +155,17 @@ resource "aws_instance" "jenkins" {
   })
 
   tags = merge(var.tags, { Name = "jenkins-ec2" })
+
+  # Floci's EC2 emulation doesn't faithfully track several networking
+  # identity attributes on refresh — it reports back generic placeholders
+  # ("subnet-default-c", "sg-default") and associate_public_ip_address as
+  # false regardless of the real config (Floci reachability comes from
+  # Docker port publishing — see docker_container.floci's sibling
+  # containers — not a real ENI/public IP/subnet). subnet_id is normally
+  # ForceNew, so left unignored this forces a replace on every single
+  # plan. Same category of drift as the IAM instance profile's tags_all
+  # above.
+  lifecycle {
+    ignore_changes = [associate_public_ip_address, subnet_id, vpc_security_group_ids]
+  }
 }
