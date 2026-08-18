@@ -23,13 +23,13 @@ def makeScm = {
   )
 }
 
-def createOrUpdateJob = { name, description, paramsDef, scriptPath = "jenkins/Jenkinsfile" ->
+def createOrUpdateJob = { name, description, paramsDef, scriptPath = "jenkins/Jenkinsfile", scm = null ->
   def job = jenkins.getItem(name)
   if (job == null) {
     job = jenkins.createProject(WorkflowJob.class, name)
   }
   job.setDescription(description)
-  def flowDef = new CpsScmFlowDefinition(makeScm(), scriptPath)
+  def flowDef = new CpsScmFlowDefinition(scm ?: makeScm(), scriptPath)
   flowDef.setLightweight(true)
   job.setDefinition(flowDef)
   if (paramsDef != null) {
@@ -39,6 +39,17 @@ def createOrUpdateJob = { name, description, paramsDef, scriptPath = "jenkins/Je
   job.save()
   return job
 }
+
+// ai-notification-system, not platform-gitops — this one job's primary
+// SCM has to be the source repo, since GIT_PREVIOUS_SUCCESSFUL_COMMIT
+// (used by its Jenkinsfile's turbo --filter) is only populated for a
+// job's primary checkout, never a secondary dir('src'){git ...} one.
+def sourceRepoScm = new GitSCM(
+  [new UserRemoteConfig("https://github.com/dip7501686040/ai-notification-system.git", null, null, null)],
+  [new BranchSpec("*/main")],
+  false, [],
+  null, null, []
+)
 
 // Generic/manual-override job — SERVICES accepts a comma-separated list
 // or "all", nothing pinned.
@@ -60,19 +71,22 @@ services.each { svc ->
   createOrUpdateJob("build-" + svc, "CI: build/push " + svc + " and bump its image tag in git", params)
 }
 
-// Polls ai-notification-system's main branch and builds only the
-// apps/<service>/ dirs that actually changed, one at a time — see
-// jenkins/watch-source.Jenkinsfile. Its declarative triggers{cron(...)}
-// block only registers after this job's first run (standard Jenkins
-// behavior for pipeline-defined triggers) — click "Build Now" once after
-// this is seeded; it self-schedules from then on.
+// Primary SCM is ai-notification-system itself (see sourceRepoScm above),
+// using Jenkins' built-in pollSCM trigger (declarative triggers{} block in
+// that repo's own Jenkinsfile) — turbo --filter decides which packages
+// are actually affected, dependency-graph aware, and triggers
+// build-<service> one at a time only for those. Its triggers{} block only
+// registers after this job's first run (standard Jenkins behavior for
+// pipeline-defined triggers) — click "Build Now" once after this is
+// seeded; it self-schedules from then on.
 createOrUpdateJob(
   "watch-source-and-build",
-  "CI: polls ai-notification-system main, builds only the service(s) that actually changed, one at a time. Run once manually after first seeding to register its poll schedule.",
+  "CI: polls ai-notification-system main; turbo determines which packages are actually affected, then triggers build-<service> one at a time for those only. Run once manually after first seeding to register its poll schedule.",
   new ParametersDefinitionProperty([
     new ChoiceParameterDefinition("ENVIRONMENT", ["local", "prod"] as String[], "Which environment build-<service> should deploy to"),
   ]),
-  "jenkins/watch-source.Jenkinsfile"
+  "Jenkinsfile",
+  sourceRepoScm
 )
 
 jenkins.save()
