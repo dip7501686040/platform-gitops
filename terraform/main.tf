@@ -163,3 +163,219 @@ resource "terraform_data" "jenkins_ssh_tunnel" {
 
   depends_on = [module.jenkins_ec2]
 }
+
+# Floci-only: k3s (inside the floci-eks-<cluster> container) registers a
+# brand-new Node identity essentially every time its process restarts, not
+# just when the container itself is recreated. The old Node never gets a
+# clean kubelet handoff, so its pods get stuck "Terminating" forever, and
+# any PVC bound to that old Node (local-path's PVs are hard node-affinity
+# pinned) becomes permanently unmountable. This doesn't fix *why* k3s does
+# that — it self-heals the fallout on every apply instead: force-delete
+# zombie Terminating pods, remove NotReady nodes, and delete any PVC whose
+# PV is pinned to a node that's no longer live (its StatefulSet recreates a
+# fresh one against the current node automatically).
+resource "terraform_data" "k8s_reconcile" {
+  count = var.manage_floci ? 1 : 0
+
+  depends_on = [module.eks]
+
+  # Re-run on every single apply, not just when something in the module.eks
+  # graph changed — the whole point is to catch node/pod churn that happened
+  # *between* applies, which Terraform's own diffing can't see coming.
+  triggers_replace = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -e
+      KCONFIG="$(mktemp)"
+      trap 'rm -f "$KCONFIG"' EXIT
+
+      echo "waiting for k3s API on ${module.eks.cluster_endpoint}..."
+      for i in $(seq 1 30); do
+        if docker exec "floci-eks-${module.eks.cluster_name}" test -f /etc/rancher/k3s/k3s.yaml 2>/dev/null; then
+          break
+        fi
+        sleep 2
+      done
+
+      docker exec "floci-eks-${module.eks.cluster_name}" cat /etc/rancher/k3s/k3s.yaml \
+        | sed "s|https://127.0.0.1:6443|${module.eks.cluster_endpoint}|" \
+        > "$KCONFIG"
+      export KUBECONFIG="$KCONFIG"
+
+      for i in $(seq 1 30); do
+        kubectl get nodes >/dev/null 2>&1 && break
+        sleep 2
+      done
+
+      echo "cleaning up stale Terminating pods..."
+      kubectl get pods -A --no-headers 2>/dev/null | awk '$4=="Terminating"{print $2, $1}' | \
+        while read -r ns name; do
+          kubectl delete pod "$name" -n "$ns" --grace-period=0 --force >/dev/null 2>&1 || true
+        done
+
+      echo "removing NotReady nodes..."
+      LIVE_NODES=""
+      for node in $(kubectl get nodes --no-headers 2>/dev/null | awk '{print $1}'); do
+        status=$(kubectl get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+        if [ "$status" = "True" ]; then
+          LIVE_NODES="$LIVE_NODES $node"
+        else
+          kubectl delete node "$node" >/dev/null 2>&1 || true
+        fi
+      done
+
+      echo "reconciling PVCs pinned to now-deleted nodes..."
+      kubectl get pvc -A --no-headers 2>/dev/null | awk '{print $1, $2}' | \
+        while read -r ns name; do
+          pv=$(kubectl get pvc "$name" -n "$ns" -o jsonpath='{.spec.volumeName}' 2>/dev/null)
+          [ -z "$pv" ] && continue
+          pinned=$(kubectl get pv "$pv" -o jsonpath='{.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[0]}' 2>/dev/null)
+          [ -z "$pinned" ] && continue
+          case " $LIVE_NODES " in
+            *" $pinned "*) ;;
+            *)
+              echo "  $ns/$name is pinned to dead node $pinned -- deleting so it recreates fresh"
+              kubectl delete pvc "$name" -n "$ns" >/dev/null 2>&1 || true
+              ;;
+          esac
+        done
+
+      echo "k8s reconcile complete."
+    EOT
+  }
+}
+
+# Floci-only. app-secrets is read by both the backing-services chart
+# (postgres/rabbitmq's own credentials) and every nest-service chart
+# (DATABASE_URL/RABBITMQ_URL composition) -- without it, pods sit in
+# CreateContainerConfigError regardless of whether their image exists.
+# This was always a manual `kubectl create secret --from-env-file` step
+# (see k8s/secrets/prod.env.example) that nothing automated or even
+# documented in Option B's setup. var.jwt_secret etc. already flow into
+# every apply via secrets.local.tfvars -- this just actually uses them.
+# Never wired up for prod: real secrets there stay a deliberate manual
+# step, not something Terraform auto-applies.
+resource "terraform_data" "app_secrets" {
+  count = var.manage_floci ? 1 : 0
+
+  depends_on = [terraform_data.k8s_reconcile]
+
+  triggers_replace = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -e
+      KCONFIG="$(mktemp)"
+      trap 'rm -f "$KCONFIG"' EXIT
+      docker exec "floci-eks-${module.eks.cluster_name}" cat /etc/rancher/k3s/k3s.yaml \
+        | sed "s|https://127.0.0.1:6443|${module.eks.cluster_endpoint}|" \
+        > "$KCONFIG"
+      export KUBECONFIG="$KCONFIG"
+
+      kubectl create namespace ai-notification --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+      kubectl create secret generic app-secrets -n ai-notification \
+        --from-literal=JWT_SECRET='${var.jwt_secret}' \
+        --from-literal=POSTGRES_PASSWORD='${var.postgres_password}' \
+        --from-literal=RABBITMQ_PASSWORD='${var.rabbitmq_password}' \
+        --from-literal=RABBITMQ_URL='amqp://notification:${var.rabbitmq_password}@rabbitmq:5672' \
+        --from-literal=ANTHROPIC_API_KEY='${var.anthropic_api_key}' \
+        --from-literal=OPENAI_API_KEY='${var.openai_api_key}' \
+        --from-literal=SMTP_PASSWORD='${var.smtp_password}' \
+        --from-literal=STRIPE_SECRET_KEY='${var.stripe_secret_key}' \
+        --from-literal=STRIPE_WEBHOOK_SECRET='${var.stripe_webhook_secret}' \
+        --from-literal=GOOGLE_CLIENT_SECRET='${var.google_client_secret}' \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+      echo "app-secrets applied."
+    EOT
+  }
+}
+
+# Floci-only: installs/upgrades ArgoCD itself via the helm CLI directly
+# (not Terraform's helm/kubernetes providers -- those need static-ish auth
+# config, and this cluster's client cert/key only exist inside the
+# floci-eks container, fetched by shelling out; same reason k8s_reconcile
+# and argocd_manifests below use kubectl via local-exec instead of the
+# kubernetes provider). `helm upgrade --install` is idempotent -- safe and
+# cheap to re-run every apply, and self-heals a cluster that never had
+# ArgoCD installed at all (a genuinely fresh rebuild) without a manual
+# `helm install` step.
+resource "terraform_data" "argocd_install" {
+  count = var.manage_floci ? 1 : 0
+
+  # app_secrets, not just k8s_reconcile: backing-services starts getting
+  # synced once ArgoCD exists, and it needs app-secrets to actually come up
+  # clean instead of CreateContainerConfigError while it waits.
+  depends_on = [terraform_data.k8s_reconcile, terraform_data.app_secrets]
+
+  triggers_replace = {
+    always_run  = timestamp()
+    values_hash = filesha256("${path.root}/../k8s/argocd/values-core.yaml")
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -e
+      KCONFIG="$(mktemp)"
+      trap 'rm -f "$KCONFIG"' EXIT
+      docker exec "floci-eks-${module.eks.cluster_name}" cat /etc/rancher/k3s/k3s.yaml \
+        | sed "s|https://127.0.0.1:6443|${module.eks.cluster_endpoint}|" \
+        > "$KCONFIG"
+      export KUBECONFIG="$KCONFIG"
+
+      helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
+      helm repo update argo >/dev/null 2>&1
+
+      helm upgrade --install argocd argo/argo-cd \
+        --namespace argocd --create-namespace \
+        -f "${path.root}/../k8s/argocd/values-core.yaml" \
+        --wait --timeout 5m
+    EOT
+  }
+}
+
+# Re-applies the ArgoCD Application/ApplicationSet manifests on every apply,
+# so this repo's own manifest files are always what's actually live in the
+# cluster -- catches both drift (like the stale infra/floci-gitops
+# targetRevision this project shipped with for a while, silently breaking
+# every sync) and a cluster that's missing them entirely after being
+# rebuilt.
+resource "terraform_data" "argocd_manifests" {
+  count = var.manage_floci ? 1 : 0
+
+  depends_on = [terraform_data.argocd_install]
+
+  triggers_replace = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -e
+      KCONFIG="$(mktemp)"
+      trap 'rm -f "$KCONFIG"' EXIT
+      docker exec "floci-eks-${module.eks.cluster_name}" cat /etc/rancher/k3s/k3s.yaml \
+        | sed "s|https://127.0.0.1:6443|${module.eks.cluster_endpoint}|" \
+        > "$KCONFIG"
+      export KUBECONFIG="$KCONFIG"
+
+      if ! kubectl get namespace argocd >/dev/null 2>&1; then
+        echo "argocd namespace doesn't exist yet -- ArgoCD itself isn't Terraform-managed, skipping manifest apply." >&2
+        exit 0
+      fi
+
+      kubectl apply -f "${path.root}/../k8s/argocd/applications/"
+      kubectl apply -f "${path.root}/../k8s/argocd/applicationsets/"
+    EOT
+  }
+}
