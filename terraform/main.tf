@@ -85,6 +85,12 @@ resource "terraform_data" "jenkins_ssh_tunnel" {
     public_ip  = module.jenkins_ec2[0].public_ip
     local_port = var.jenkins_local_tunnel_port
     key_path   = module.jenkins_ec2[0].ssh_private_key_path
+    # public_ip alone isn't enough to detect a replaced instance: Floci
+    # always reports 127.0.0.1 regardless of which underlying container it
+    # is, so without instance_id here a replaced instance (new container,
+    # new Floci-assigned SSH port) silently leaves the tunnel pointed at
+    # the old, now-gone port.
+    instance_id = module.jenkins_ec2[0].instance_id
     # Bump this whenever the provisioner script body below changes —
     # terraform_data only re-runs provisioners on replace, and replacement
     # is driven solely by this map, not by the script text itself.
