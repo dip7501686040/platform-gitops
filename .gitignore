@@ -1,17 +1,5 @@
 .DS_Store
 
-# Terraform
-.terraform/
-.terraform-*/
-*.tfstate
-*.tfstate.*
-*.tfplan
-crash.log
-override.tf
-override.tf.json
-terraform/secrets.*.tfvars
-terraform/envs/state/
-
 # Kubernetes secrets (kubectl create secret --from-env-file input)
 k8s/secrets/*.env
 !k8s/secrets/*.env.example
