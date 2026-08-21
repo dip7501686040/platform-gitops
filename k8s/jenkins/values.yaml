@@ -20,16 +20,36 @@
 # so kaniko replaces `docker build`/`docker push` entirely).
 
 controller:
-  # Unpinned, latest-compatible — same convention the old EC2 bootstrap.sh
-  # used (`--plugins git workflow-aggregator credentials-binding
-  # credentials`, no versions pinned). kubernetes: lets the Jenkinsfile's
-  # own `agent { kubernetes { ... } }` blocks spin up build pods.
+  # kubernetes: lets the Jenkinsfile's own `agent { kubernetes { ... } }`
+  # blocks spin up build pods. configuration-as-code: not for anything we
+  # configure via JCasC ourselves (we don't) -- the chart's own
+  # controller.JCasC.defaultConfig (true by default, not overridden here)
+  # renders a default Kubernetes cloud into a JCasC yaml automatically, but
+  # that yaml is inert without this plugin actually installed to apply it.
+  # Confirmed live: omitting it (this list fully replaces the chart's own
+  # default installPlugins, which does include it) left `kubernetes { ... }`
+  # agents in the Jenkinsfile failing every build with "No Kubernetes cloud
+  # was found."
+  #
+  # Versions pinned (not "latest", despite the old EC2 bootstrap.sh's
+  # unpinned convention) -- confirmed live: with unpinned plugins, the
+  # plugin-installer resolves "latest" by fetching plugin-versions.json,
+  # and on this connection that fetch reliably wedges forever (a mirror
+  # closes the connection mid-response and the tool's HTTP client has no
+  # read timeout to notice) -- watched it sit for 10+ minutes with the
+  # socket stuck in CLOSE_WAIT, twice, on two separate fresh pods. Pinning
+  # to update-center's current versions for each plugin skips that fetch
+  # entirely (versions come from update-center.json instead, which has
+  # downloaded fine every time). Will drift stale over time since nothing
+  # re-pins these automatically -- an acceptable tradeoff for a local dev
+  # cluster over a hang that blocks every single Jenkins (re)start.
   installPlugins:
-    - git
-    - workflow-aggregator
-    - credentials-binding
-    - credentials
-    - kubernetes
+    - git:5.10.1
+    - workflow-aggregator:608.v67378e9d3db_1
+    - credentials-binding:728.v902a_273b_8947
+    - credentials:1511.v2e3cb_0008ef0
+    - kubernetes:4540.v612369217f87
+    - configuration-as-code:2117.vc05a_0b_e6b_f4e
 
   # Skips the interactive setup wizard — initScripts below seed the admin
   # account and jobs immediately, matching the old EC2 bootstrap.sh's
