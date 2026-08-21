@@ -1,0 +1,58 @@
+# Jenkins as a Kubernetes workload, not a dedicated EC2/VM instance —
+# installed directly via `helm upgrade --install` (terraform_data.jenkins_install
+# in platform-infrastructure), same pattern as ArgoCD itself
+# (k8s/argocd/values-core.yaml): not GitOps-self-managed, since it's part of
+# the platform/CI control plane rather than an application.
+#
+# Why not the EC2 emulation this project used originally: no process
+# supervision (Floci's EC2 emulation has no systemd — Jenkins and sshd both
+# died independently with nothing to restart them), Floci's own EC2 instance
+# state machine proved unreliable under normal Docker Desktop restarts
+# (stuck "pending", public IP never assigned, instances vanishing outside
+# Terraform's view). Kubernetes gives Jenkins a Deployment's restart
+# guarantees for free, and reuses the exact same kubectl-port-forward
+# browser-access pattern already used for ArgoCD and the app (see
+# jenkins_tunnel in main.tf) instead of an SSH tunnel to a VM.
+#
+# Build agents are dynamic Kubernetes pods (the Jenkinsfile's own `agent {
+# kubernetes { ... } }` block defines them per-run, including a kaniko
+# container — the k3s node itself has no docker.sock to give a build agent,
+# so kaniko replaces `docker build`/`docker push` entirely).
+
+controller:
+  # Unpinned, latest-compatible — same convention the old EC2 bootstrap.sh
+  # used (`--plugins git workflow-aggregator credentials-binding
+  # credentials`, no versions pinned). kubernetes: lets the Jenkinsfile's
+  # own `agent { kubernetes { ... } }` blocks spin up build pods.
+  installPlugins:
+    - git
+    - workflow-aggregator
+    - credentials-binding
+    - credentials
+    - kubernetes
+
+  # Skips the interactive setup wizard — initScripts below seed the admin
+  # account and jobs immediately, matching the old EC2 bootstrap.sh's
+  # JAVA_OPTS_COMMON="-Djenkins.install.runSetupWizard=false".
+  jenkinsOpts: "-Djenkins.install.runSetupWizard=false"
+
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { cpu: 500m, memory: 1Gi }
+
+  # "" uses the cluster's default StorageClass — same convention as
+  # k8s/charts/backing-services/values.yaml (Floci's k3s ships local-path
+  # as the default; real AWS would use the gp3 class created there).
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 4Gi
+
+  serviceType: ClusterIP
+
+# rbac.create + controller.serviceAccount defaults already grant the
+# controller's own service account permission to create/list/delete pods in
+# its namespace — exactly what the `kubernetes` plugin needs to spin up
+# kaniko build pods, no extra RBAC config needed here.
+rbac:
+  create: true

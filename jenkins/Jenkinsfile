@@ -14,10 +14,15 @@
 // control — see the tag-bump push step below for the one place that still
 // needs a credential (write access).
 //
-// Concurrency is capped at 2 by construction: SERVICE_CATALOG is processed
-// in batches of at most 2, run sequentially, one `parallel` block per
-// batch — not a plugin-based throttle, to avoid adding another external
-// Jenkins dependency.
+// Builds via kaniko, not `docker build`/`docker push` directly: Jenkins now
+// runs as a Kubernetes pod itself (see k8s/jenkins/values.yaml), and the k3s
+// node it schedules onto has no docker.sock to give a build agent — kaniko
+// is the standard way to build/push images from inside a pod with no Docker
+// daemon at all. One kaniko pod at a time, not batched/parallel: this
+// project's whole Floci-based local environment has repeatedly shown it
+// can't absorb concurrent load (see platform-infrastructure/main.tf's own
+// sequencing comments) — simpler and safer than the previous batches-of-2
+// scheme.
 
 def SOURCE_REPO_URL = 'https://github.com/dip7501686040/ai-notification-system.git'
 def SOURCE_BRANCH = 'main'
@@ -67,9 +72,9 @@ def SERVICE_CATALOG = [
     dockerfile: 'src/docker/nest-service.Dockerfile', context: 'src',
     buildArgs: [APP_NAME: '@ai-notification/api-gateway', APP_DIR: 'api-gateway'],
   ],
-  // web is deliberately last in the batch order below — its
-  // NEXT_PUBLIC_API_URL build-arg is baked in at image build time and
-  // should point at api-gateway's real external URL once one exists.
+  // web is deliberately last — its NEXT_PUBLIC_API_URL build-arg is baked
+  // in at image build time and should point at api-gateway's real external
+  // URL once one exists.
   'web': [
     dockerfile: 'src/docker/web-service.Dockerfile', context: 'src',
     buildArgs: [NEXT_PUBLIC_API_URL: params.WEB_API_URL ?: 'http://localhost:8000'],
@@ -80,22 +85,34 @@ def SERVICE_CATALOG = [
   ],
 ]
 
-// Pairs of at most 2, no service depends on another's build finishing
-// first (image builds are independent — this ordering just keeps the
-// same overall sequence as the original rollout plan, not a hard
-// requirement for CI itself).
-def BATCHES = [
-  ['identity-service', 'tenant-service'],
-  ['event-service', 'rule-engine-service'],
-  ['template-service', 'notification-service'],
-  ['channel-service', 'ai-service'],
-  ['analytics-service', 'audit-service'],
-  ['api-gateway', 'web'],
-  ['prediction-service'],
+// Order matches the previous batching scheme's sequence, just flattened —
+// no service depends on another's build finishing first, this is purely
+// cosmetic continuity with the original rollout plan.
+def BUILD_ORDER = [
+  'identity-service', 'tenant-service', 'event-service', 'rule-engine-service',
+  'template-service', 'notification-service', 'channel-service', 'ai-service',
+  'analytics-service', 'audit-service', 'api-gateway', 'web', 'prediction-service',
 ]
 
 pipeline {
-  agent any
+  agent {
+    kubernetes {
+      yaml '''
+        apiVersion: v1
+        kind: Pod
+        spec:
+          containers:
+          - name: kaniko
+            image: gcr.io/kaniko-project/executor:v1.23.2-debug
+            command: ["sleep"]
+            args: ["99d"]
+            resources:
+              requests: { cpu: 100m, memory: 256Mi }
+              limits: { cpu: 500m, memory: 512Mi }
+      '''
+      defaultContainer 'jnlp'
+    }
+  }
 
   parameters {
     choice(name: 'ENVIRONMENT', choices: ['local', 'prod'], description: 'Which k8s/environments/<env> to update')
@@ -117,7 +134,7 @@ pipeline {
       steps {
         // Plain shell parsing rather than the readProperties step, to avoid
         // needing the pipeline-utility-steps plugin on top of the minimal
-        // plugin set (Pipeline, Git, Credentials Binding) this setup needs.
+        // plugin set this setup needs.
         script {
           def propsFile = "jenkins/env/${params.ENVIRONMENT}.properties"
           env.AWS_REGION   = sh(script: "grep '^AWS_REGION='   ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
@@ -140,48 +157,49 @@ pipeline {
       }
     }
 
-    stage('ECR login') {
-      steps {
-        sh 'aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"'
-      }
-    }
-
-    stage('Build + push (batched, max 2 parallel)') {
+    stage('Build + push (kaniko, one service at a time)') {
       steps {
         script {
           def requested = params.SERVICES.trim() == 'all'
             ? SERVICE_CATALOG.keySet()
             : params.SERVICES.split(',').collect { it.trim() }
 
-          for (batch in BATCHES) {
-            def toBuild = batch.findAll { requested.contains(it) }
-            if (toBuild.isEmpty()) {
+          for (svc in BUILD_ORDER) {
+            if (!requested.contains(svc)) {
               continue
             }
+            def cfg = SERVICE_CATALOG[svc]
+            def image = "${env.ECR_REGISTRY}/${svc}:${env.GIT_SHA}"
+            // kaniko's --dockerfile is relative to --context, not the
+            // workspace root (docker build's -f is workspace-root-relative)
+            // -- every catalog entry's dockerfile path already starts with
+            // its own context path, so strip that prefix.
+            def dockerfileInContext = cfg.dockerfile.substring(cfg.context.length() + 1)
+            def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg=${k}=${v}" }.join(' ')
 
-            def branches = [:]
-            for (svc in toBuild) {
-              def name = svc
-              def cfg = SERVICE_CATALOG[name]
-              branches[name] = {
-                def image = "${env.ECR_REGISTRY}/${name}:${env.GIT_SHA}"
-                def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg ${k}='${v}'" }.join(' ')
-                sh """
-                  docker build -f ${cfg.dockerfile} ${buildArgFlags} -t ${image} ${cfg.context}
-                  docker push ${image}
-                """
-                def valuesFile = "k8s/environments/${env.K8S_ENV}/values-${name}.yaml"
-                sh """
-                  sed -i "s|^\\(\\s*repository:\\).*|\\1 ${env.ECR_REGISTRY}/${name}|" ${valuesFile}
-                  sed -i "s|^\\(\\s*tag:\\).*|\\1 \\"${env.GIT_SHA}\\"|" ${valuesFile}
-                """
-              }
+            container('kaniko') {
+              // --insecure/--insecure-pull/--skip-tls-verify: Floci's ECR
+              // emulation is a plain unauthenticated HTTP registry (see
+              // jenkins/env/local.properties) -- fine for local, but this
+              // is NOT how prod's real ECR (proper HTTPS + IAM auth) should
+              // be pushed to. Deliberately not handled yet -- prod-only
+              // work is deferred until prod is actually being set up.
+              sh """
+                /kaniko/executor \
+                  --context=dir://\${WORKSPACE}/${cfg.context} \
+                  --dockerfile=${dockerfileInContext} \
+                  ${buildArgFlags} \
+                  --destination=${image} \
+                  --insecure --insecure-pull --skip-tls-verify
+              """
             }
-            parallel branches
 
+            def valuesFile = "k8s/environments/${env.K8S_ENV}/values-${svc}.yaml"
             sh """
-              git add ${toBuild.collect { "k8s/environments/${env.K8S_ENV}/values-${it}.yaml" }.join(' ')}
-              git commit -m "ci: bump image tag for ${toBuild.join(', ')} to \${GIT_SHA}"
+              sed -i "s|^\\(\\s*repository:\\).*|\\1 ${env.ECR_REGISTRY}/${svc}|" ${valuesFile}
+              sed -i "s|^\\(\\s*tag:\\).*|\\1 \\"${env.GIT_SHA}\\"|" ${valuesFile}
+              git add ${valuesFile}
+              git commit -m "ci: bump image tag for ${svc} to ${env.GIT_SHA}"
             """
           }
         }
@@ -190,9 +208,9 @@ pipeline {
 
     stage('Push tag-bump commits') {
       steps {
-        // github-push credential is seeded automatically into the instance's
-        // credential store at boot (see terraform/modules/jenkins-ec2's
-        // init.groovy.d script) — nothing manual needed here.
+        // github-push credential is seeded automatically into Jenkins' own
+        // credential store at startup (see k8s/jenkins/values.yaml's
+        // initScripts) — nothing manual needed here.
         //
         // Rebase-and-retry rather than a bare push: this branch can move
         // between checkout and push (another build, or a human pushing
