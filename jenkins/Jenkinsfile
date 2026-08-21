@@ -107,8 +107,15 @@ pipeline {
             command: ["sleep"]
             args: ["99d"]
             resources:
-              requests: { cpu: 100m, memory: 256Mi }
-              limits: { cpu: 500m, memory: 512Mi }
+              # 512Mi was OOMKilling every build -- confirmed live, kaniko
+              # actually executes the Dockerfile's own build steps
+              # (`pnpm install` + `pnpm turbo run build` for a full NestJS/
+              # TypeScript app), not just a lightweight layer copy, and that
+              # genuinely needs well over 512Mi. Limit raised accordingly;
+              # request stays modest since only one of these runs at a time
+              # (see the Jenkinsfile's own "one service at a time" note).
+              requests: { cpu: 100m, memory: 512Mi }
+              limits: { cpu: 1000m, memory: 2Gi }
       '''
       defaultContainer 'jnlp'
     }
