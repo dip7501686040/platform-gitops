@@ -1,6 +1,6 @@
 image:
-  repository: ai-notification/rule-engine-service
-  tag: dev
+  repository: 172.17.0.2:5000/ai-notification/rule-engine-service
+  tag: "fdf7fc54"
 
 healthGrpcPort: 50056
 appGrpcPort: 50156
