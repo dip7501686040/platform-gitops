@@ -1,6 +1,6 @@
 image:
-  repository: 172.17.0.3:5000/ai-notification/audit-service
-  tag: "728558e7"
+  repository: 172.17.0.2:5000/ai-notification/audit-service
+  tag: "fdf7fc54"
 
 healthGrpcPort: 50061
 appGrpcPort: 50161
