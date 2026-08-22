@@ -1,6 +1,6 @@
 image:
-  repository: ai-notification/analytics-service
-  tag: dev
+  repository: 172.17.0.2:5000/ai-notification/analytics-service
+  tag: "fdf7fc54"
 
 healthGrpcPort: 50060
 appGrpcPort: 50160
