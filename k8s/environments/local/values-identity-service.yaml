@@ -1,6 +1,6 @@
 image:
-  repository: 172.17.0.3:5000/ai-notification/identity-service
-  tag: "cec58bea"
+  repository: 172.17.0.2:5000/ai-notification/identity-service
+  tag: "fdf7fc54"
 
 healthGrpcPort: 50052
 appGrpcPort: 50152
