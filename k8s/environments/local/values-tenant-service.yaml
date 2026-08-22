@@ -1,6 +1,6 @@
 image:
-  repository: ai-notification/tenant-service
-  tag: dev
+  repository: 172.17.0.2:5000/ai-notification/tenant-service
+  tag: "fdf7fc54"
 
 healthGrpcPort: 50053
 appGrpcPort: 50153
