@@ -1,6 +1,6 @@
 image:
-  repository: ai-notification/api-gateway
-  tag: dev
+  repository: 172.17.0.2:5000/ai-notification/api-gateway
+  tag: "fdf7fc54"
 
 healthGrpcPort: 50051
 httpPort: 8000
