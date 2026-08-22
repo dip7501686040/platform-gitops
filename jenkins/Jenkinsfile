@@ -150,6 +150,12 @@ pipeline {
           // The image tag must track the *source* repo's commit, not this
           // (platform-gitops) repo's — GIT_COMMIT here would be the latter.
           env.GIT_SHA = sh(script: "git -C src rev-parse --short=8 HEAD", returnStdout: true).trim()
+          // Full SHA, not the short one above -- kaniko's own git-context
+          // fetch (see the Build + push stage) needs an unambiguous ref to
+          // resolve, and an 8-char abbreviation risks collision/ambiguity
+          // that the short form (only ever used cosmetically, for the image
+          // tag) doesn't need to worry about.
+          env.GIT_SHA_FULL = sh(script: "git -C src rev-parse HEAD", returnStdout: true).trim()
         }
         // Local (not --global) repo config, set once — needed by every git
         // operation that creates a commit, including the rebase replay in
@@ -177,28 +183,72 @@ pipeline {
             }
             def cfg = SERVICE_CATALOG[svc]
             def image = "${env.ECR_REGISTRY}/${svc}:${env.GIT_SHA}"
-            // kaniko's --dockerfile is relative to --context, not the
-            // workspace root (docker build's -f is workspace-root-relative)
-            // -- every catalog entry's dockerfile path already starts with
-            // its own context path, so strip that prefix.
+            // kaniko's --dockerfile (and --context-sub-path below) is
+            // relative to its build context, not the workspace root
+            // (docker build's -f is workspace-root-relative) -- every
+            // catalog entry's dockerfile path already starts with its own
+            // context path, so strip that prefix.
             def dockerfileInContext = cfg.dockerfile.substring(cfg.context.length() + 1)
+            // cfg.context is 'src' (repo root, from this pipeline's own
+            // dir('src') checkout naming) for every service except
+            // prediction-service ('src/apps/prediction-service') -- kaniko's
+            // git context below clones the repo directly with no 'src/'
+            // wrapper, so 'src' maps to no sub-path at all, and anything
+            // else maps to itself with that prefix stripped.
+            def contextSubPath = cfg.context == 'src' ? '' : cfg.context.substring('src/'.length())
             def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg=${k}=${v}" }.join(' ')
 
-            container('kaniko') {
-              // --insecure/--insecure-pull/--skip-tls-verify: Floci's ECR
-              // emulation is a plain unauthenticated HTTP registry (see
-              // jenkins/env/local.properties) -- fine for local, but this
-              // is NOT how prod's real ECR (proper HTTPS + IAM auth) should
-              // be pushed to. Deliberately not handled yet -- prod-only
-              // work is deferred until prod is actually being set up.
-              sh """
-                /kaniko/executor \
-                  --context=dir://\${WORKSPACE}/${cfg.context} \
-                  --dockerfile=${dockerfileInContext} \
-                  ${buildArgFlags} \
-                  --destination=${image} \
-                  --insecure --insecure-pull --skip-tls-verify
-              """
+            // A fresh pod per service, not one shared kaniko container
+            // reused across the whole loop -- confirmed live, container
+            // reuse breaks after the very first build: kaniko doesn't just
+            // read the Dockerfile, it actually *executes* it (RUN, COPY,
+            // USER, ...) against its own container's root filesystem to
+            // produce layers, so by the time identity-service's build
+            // finished, the kaniko container's own shell/environment was
+            // already overwritten by node:24-alpine's unpacked layers --
+            // every subsequent `sh` exec into it failed immediately with
+            // "Process exited immediately after creation". kaniko pods are
+            // single-use by design; this respects that instead of fighting
+            // it. Building from kaniko's own git context (not a shared
+            // workspace mount) keeps each pod fully self-contained -- no
+            // volume-sharing complexity, at the cost of a fresh shallow
+            // clone per service, which is cheap next to the actual build.
+            def podLabel = "kaniko-${svc}-${env.BUILD_NUMBER}"
+            podTemplate(
+              label: podLabel,
+              containers: [
+                containerTemplate(
+                  name: 'kaniko',
+                  image: 'gcr.io/kaniko-project/executor:v1.23.2-debug',
+                  command: 'sleep',
+                  args: '99d',
+                  resourceRequestCpu: '100m',
+                  resourceRequestMemory: '512Mi',
+                  resourceLimitCpu: '1000m',
+                  resourceLimitMemory: '2Gi',
+                )
+              ]
+            ) {
+              node(podLabel) {
+                container('kaniko') {
+                  // --insecure/--insecure-pull/--skip-tls-verify: Floci's
+                  // ECR emulation is a plain unauthenticated HTTP registry
+                  // (see jenkins/env/local.properties) -- fine for local,
+                  // but this is NOT how prod's real ECR (proper HTTPS + IAM
+                  // auth) should be pushed to. Deliberately not handled yet
+                  // -- prod-only work is deferred until prod is actually
+                  // being set up.
+                  sh """
+                    /kaniko/executor \
+                      --context=git://${SOURCE_REPO_URL.replaceFirst('^https://', '')}#${env.GIT_SHA_FULL} \
+                      ${contextSubPath ? "--context-sub-path=${contextSubPath}" : ''} \
+                      --dockerfile=${dockerfileInContext} \
+                      ${buildArgFlags} \
+                      --destination=${image} \
+                      --insecure --insecure-pull --skip-tls-verify
+                  """
+                }
+              }
             }
 
             def valuesFile = "k8s/environments/${env.K8S_ENV}/values-${svc}.yaml"
