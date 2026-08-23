@@ -12,3 +12,7 @@ database:
 
 serviceType: NodePort
 httpNodePort: 30081
+
+env:
+  # TODO: replace with the real prod frontend origin once one exists.
+  CORS_ORIGINS: "http://localhost:3000"

@@ -10,3 +10,6 @@ database:
 
 serviceType: NodePort
 httpNodePort: 30081
+
+env:
+  CORS_ORIGINS: "http://localhost:3000"
