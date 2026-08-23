@@ -7,3 +7,6 @@ httpPort: 8000
 
 database:
   enabled: false
+
+serviceType: NodePort
+httpNodePort: 30081

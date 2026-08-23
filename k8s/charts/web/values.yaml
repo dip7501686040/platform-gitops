@@ -7,6 +7,13 @@ replicaCount: 1
 port: 3000
 healthPath: /login
 
+# ClusterIP by default; set to NodePort (with a fixed nodePort) in an
+# environment's values-web.yaml to front this Service with the ALB —
+# see modules/loadbalancer in platform-infrastructure, which registers
+# that same nodePort as an ELBv2 target.
+serviceType: ClusterIP
+nodePort: null
+
 resources:
   requests:
     cpu: 50m

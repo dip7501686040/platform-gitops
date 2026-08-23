@@ -21,6 +21,13 @@ appGrpcPortEnvName: ""
 httpPort: null
 httpHealthPath: /health
 
+# ClusterIP by default; set to NodePort (with a fixed httpNodePort) in an
+# environment's values-<service>.yaml to front this Service with the ALB —
+# see modules/loadbalancer in platform-infrastructure, which registers that
+# same node port as an ELBv2 target. Only meaningful alongside httpPort.
+serviceType: ClusterIP
+httpNodePort: null
+
 # Shared Postgres DB this service owns, if any (see the ai-notification-system repo's infra/postgres/init.sql
 # for the full list of per-service logical databases).
 database:

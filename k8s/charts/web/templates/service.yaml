@@ -6,9 +6,13 @@ metadata:
     app.kubernetes.io/name: {{ .Release.Name }}
     app.kubernetes.io/part-of: ai-notification-system
 spec:
+  type: {{ .Values.serviceType | default "ClusterIP" }}
   selector:
     app.kubernetes.io/name: {{ .Release.Name }}
   ports:
     - name: http
       port: {{ .Values.port }}
       targetPort: http
+      {{- if .Values.nodePort }}
+      nodePort: {{ .Values.nodePort }}
+      {{- end }}

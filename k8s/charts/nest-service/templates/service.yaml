@@ -5,6 +5,7 @@ metadata:
   labels:
     {{- include "nest-service.labels" . | nindent 4 }}
 spec:
+  type: {{ .Values.serviceType | default "ClusterIP" }}
   selector:
     app.kubernetes.io/name: {{ .Release.Name }}
   ports:
@@ -12,6 +13,9 @@ spec:
     - name: http
       port: {{ .Values.httpPort }}
       targetPort: http
+      {{- if .Values.httpNodePort }}
+      nodePort: {{ .Values.httpNodePort }}
+      {{- end }}
     {{- end }}
     {{- if .Values.appGrpcPort }}
     - name: grpc

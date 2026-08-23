@@ -3,3 +3,6 @@ image:
   # (see terraform outputs.ecr_repository_urls).
   repository: REPLACE_WITH_REAL_ECR_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/ai-notification/web
   tag: unset
+
+serviceType: NodePort
+nodePort: 30080
