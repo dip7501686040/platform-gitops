@@ -4,6 +4,15 @@
 # toggle to disable the ApplicationSet controller — it always runs, but it's
 # a single small pod.
 
+# Progressive Syncs (RollingSync ApplicationSet strategy) is opt-in, not
+# on by default -- needed by nest-services-local.yaml's rollingSync strategy
+# (bounds how many nest-service Applications sync concurrently, so a real
+# multi-service deploy can't repeat the "8 prisma migrate jobs at once" CPU
+# spike a fully-parallel sync would risk).
+applicationSet:
+  extraArgs:
+    - --enable-progressive-syncs
+
 dex:
   enabled: false
 

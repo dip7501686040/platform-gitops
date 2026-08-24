@@ -1,0 +1,50 @@
+{{- if .Values.database.enabled }}
+# Runs once per actual ArgoCD sync (a real deploy -- new image/manifest),
+# not on every pod restart. This used to be baked into the container's own
+# CMD (docker/nest-service.Dockerfile in ai-notification-system), which
+# meant `prisma migrate deploy` re-ran on ANY pod restart -- crash, node
+# reschedule, HPA scale-out, not just a real deploy. Confirmed live: many
+# services' pods restarting at once from unrelated resource pressure
+# triggered 8 simultaneous migration checks and a real CPU spike (~1200%
+# CPU just from migrations). Moving it to a PreSync hook Job decouples it
+# from pod lifecycle entirely; nest-services-local.yaml's RollingSync
+# strategy bounds concurrency for the case where a real multi-service
+# deploy still lands several of these at once.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{ .Release.Name }}-migrate"
+  labels:
+    {{- include "nest-service.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        {{- include "nest-service.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Same command the old CMD ran, just moved here -- $APP_DIR comes
+          # from the image's own ENV (baked in at build time by the
+          # Dockerfile), not something this chart needs to pass in.
+          command:
+            - sh
+            - -c
+            - '"apps/$APP_DIR/node_modules/.bin/prisma" migrate deploy --schema="apps/$APP_DIR/prisma/schema.prisma"'
+          envFrom:
+            - secretRef:
+                name: app-secrets
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@{{ .Values.postgresHost }}:5432/{{ .Values.database.name }}"
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+{{- end }}

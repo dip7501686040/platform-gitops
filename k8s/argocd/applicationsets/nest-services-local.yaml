@@ -28,6 +28,11 @@ spec:
     metadata:
       name: "{{service}}"
       namespace: argocd
+      # Common label every generated Application gets, so the strategy
+      # below can bound them as one rolling group instead of needing a
+      # named group per service.
+      labels:
+        rollout-group: nest-services
     spec:
       project: default
       sources:
@@ -50,3 +55,21 @@ spec:
           selfHeal: true
         syncOptions:
           - CreateNamespace=true
+  # Bounds how many of these Applications actually sync at once (Progressive
+  # Syncs -- needs applicationSet.extraArgs: [--enable-progressive-syncs] in
+  # k8s/argocd/values-core.yaml, or this silently has no effect). Each real
+  # sync now also runs that service's migrate Job as an ArgoCD PreSync hook
+  # (k8s/charts/nest-service/templates/migrate-job.yaml) -- without this,
+  # a change landing across many services at once could still fire that
+  # many migration Jobs concurrently, the same class of CPU spike this was
+  # meant to fix, just moved from "every pod restart" to "every multi-service
+  # deploy" instead of eliminated.
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: rollout-group
+              operator: In
+              values: [nest-services]
+          maxUpdate: "2"
