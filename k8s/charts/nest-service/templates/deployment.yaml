@@ -13,6 +13,17 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: {{ .Release.Name }}
+      {{- if .Values.metrics.enabled }}
+      annotations:
+        # Annotation-based discovery, not a ServiceMonitor -- picked up
+        # automatically by the Prometheus chart's default kubernetes-pods
+        # scrape job (platform-infrastructure's prometheus_install), no
+        # CRDs involved. This is what gives per-pod attribution -- the
+        # scrape target is this exact pod's own IP, not a shared endpoint.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.metrics.port }}"
+        prometheus.io/path: "/metrics"
+      {{- end }}
     spec:
       containers:
         - name: {{ .Release.Name }}
@@ -26,6 +37,10 @@ spec:
             {{- if .Values.appGrpcPort }}
             - name: grpc
               containerPort: {{ .Values.appGrpcPort }}
+            {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
             {{- end }}
             - name: health
               containerPort: {{ .Values.healthGrpcPort }}
@@ -46,6 +61,14 @@ spec:
             {{- if .Values.database.enabled }}
             - name: DATABASE_URL
               value: "postgresql://postgres:$(POSTGRES_PASSWORD)@{{ .Values.postgresHost }}:5432/{{ .Values.database.name }}"
+            {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - name: METRICS_PROMETHEUS_PORT
+              value: "{{ .Values.metrics.port }}"
+            {{- end }}
+            {{- if .Values.otelExporterOtlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "{{ .Values.otelExporterOtlpEndpoint }}"
             {{- end }}
             {{- range $key, $value := .Values.env }}
             - name: {{ $key }}

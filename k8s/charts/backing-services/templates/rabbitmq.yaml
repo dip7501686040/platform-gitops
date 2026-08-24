@@ -11,6 +11,19 @@ spec:
       port: 5672
     - name: management
       port: 15672
+    - name: prometheus
+      port: 15692
+---
+# rabbitmq:3-management-alpine already enables rabbitmq_management by
+# default (baked into the image) -- this ConfigMap adds rabbitmq_prometheus
+# alongside it, not instead of it. Gives rabbitmq_queue_messages_ready/
+# _unacked per queue directly on :15692, no separate exporter container.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-enabled-plugins
+data:
+  enabled_plugins: "[rabbitmq_management,rabbitmq_prometheus]."
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -26,6 +39,13 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: rabbitmq
+      annotations:
+        # Same annotation-based discovery as the nest-service chart's
+        # metrics pods -- picked up by Prometheus's default kubernetes-pods
+        # scrape job, no CRDs involved.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "15692"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: rabbitmq
@@ -33,6 +53,7 @@ spec:
           ports:
             - containerPort: 5672
             - containerPort: 15672
+            - containerPort: 15692
           env:
             - name: RABBITMQ_DEFAULT_USER
               value: notification
@@ -44,6 +65,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/rabbitmq
+            - name: enabled-plugins
+              mountPath: /etc/rabbitmq/enabled_plugins
+              subPath: enabled_plugins
           readinessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "ping"]
@@ -54,6 +78,10 @@ spec:
               command: ["rabbitmq-diagnostics", "ping"]
             initialDelaySeconds: 20
             periodSeconds: 20
+      volumes:
+        - name: enabled-plugins
+          configMap:
+            name: rabbitmq-enabled-plugins
   volumeClaimTemplates:
     - metadata:
         name: data

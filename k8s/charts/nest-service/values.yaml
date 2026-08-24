@@ -36,6 +36,22 @@ database:
 
 postgresHost: postgres
 
+# Off by default -- packages/telemetry's opt-in Prometheus /metrics
+# endpoint (METRICS_PROMETHEUS_PORT). api-gateway turns this on in its own
+# environment values file; every other nest-service is unaffected.
+metrics:
+  enabled: false
+  port: 9464
+
+# Every nest-service already calls initTelemetry() (traces/logs), which
+# falls back to localhost:4317 inside each pod's own netns when unset --
+# silently going nowhere in k8s, since no collector lives there. This k8s
+# Service DNS name is identical across environments (each one gets its own
+# otel-collector via platform-infrastructure's Terraform), so it's a chart
+# default here rather than duplicated per environment. Override to ""
+# in a specific service's values file if it ever needs to opt out.
+otelExporterOtlpEndpoint: "http://otel-collector-opentelemetry-collector.observability.svc.cluster.local:4317"
+
 resources:
   requests:
     cpu: 50m

@@ -13,6 +13,12 @@ database:
 serviceType: NodePort
 httpNodePort: 30081
 
+# The one nest-service with real request-rate/latency metrics worth
+# graphing per-pod (see tenant-metrics.interceptor.ts). Every other
+# nest-service stays off (chart default) -- no metrics worth exposing yet.
+metrics:
+  enabled: true
+
 env:
   # TODO: replace with the real prod frontend origin once one exists.
   CORS_ORIGINS: "http://localhost:3000"
