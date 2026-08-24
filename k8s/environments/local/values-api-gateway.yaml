@@ -12,4 +12,6 @@ serviceType: NodePort
 httpNodePort: 30081
 
 env:
-  CORS_ORIGINS: "http://localhost:3000"
+  # web is reached through the ALB now (localhost:8080 -- see
+  # platform-infrastructure's alb_web_local_port), not a kubectl tunnel.
+  CORS_ORIGINS: "http://localhost:8080"
