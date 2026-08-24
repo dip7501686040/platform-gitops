@@ -60,6 +60,21 @@ controller:
     requests: { cpu: 200m, memory: 512Mi }
     limits: { cpu: 500m, memory: 1Gi }
 
+  # Default failureThreshold (12) x periodSeconds (10) gives the JVM only
+  # 2 minutes to become ready before kubelet kills it -- confirmed live,
+  # not enough under real CPU contention on this box (7 restarts in 29m,
+  # each failed startup probe throwing away that boot's progress and
+  # forcing a full restart, which itself adds more load -- a genuine
+  # crash-loop, not just a slow first boot). Same "give it real runway
+  # under load" reasoning as this chart's own --wait timeout 20m below;
+  # the probe just never got the same treatment. 90 x 10s = 15 minutes.
+  # Nested under probes.startupProbe, not startupProbe directly -- matches
+  # this chart's actual schema (confirmed via `helm show values`, the flat
+  # key silently no-ops since Helm merges unknown keys in without erroring).
+  probes:
+    startupProbe:
+      failureThreshold: 90
+
   # "" uses the cluster's default StorageClass — same convention as
   # k8s/charts/backing-services/values.yaml (Floci's k3s ships local-path
   # as the default; real AWS would use the gp3 class created there).
