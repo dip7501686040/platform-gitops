@@ -15,3 +15,10 @@ env:
   # web is reached through the ALB now (localhost:8080 -- see
   # platform-infrastructure's alb_web_local_port), not a kubectl tunnel.
   CORS_ORIGINS: "http://localhost:8080"
+  FRONTEND_URL: "http://localhost:8080"
+  # Same Google OAuth client already used for bare `pnpm dev`
+  # (apps/api-gateway/.env) -- not sensitive, safe as plain config.
+  # GOOGLE_CLIENT_SECRET is sensitive and goes through app-secrets instead
+  # (platform-infrastructure's secrets.local.tfvars).
+  GOOGLE_CLIENT_ID: "38603231523-0jag1il5veuu88keo1p2fhiosos3a4u6.apps.googleusercontent.com"
+  GOOGLE_CALLBACK_URL: "http://localhost:8000/auth/google/callback"
