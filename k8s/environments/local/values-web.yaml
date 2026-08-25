@@ -1,5 +1,5 @@
 image:
-  repository: 172.17.0.2:5000/ai-notification/web
+  repository: 172.17.0.3:5000/ai-notification/web
   tag: "fdf7fc54"
 
 serviceType: NodePort

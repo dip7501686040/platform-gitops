@@ -1,5 +1,5 @@
 image:
-  repository: 172.17.0.2:5000/ai-notification/api-gateway
+  repository: 172.17.0.3:5000/ai-notification/api-gateway
   tag: "00d35327"
 
 healthGrpcPort: 50051
