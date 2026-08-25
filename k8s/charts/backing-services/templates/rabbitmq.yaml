@@ -73,11 +73,15 @@ spec:
               command: ["rabbitmq-diagnostics", "ping"]
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           livenessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "ping"]
             initialDelaySeconds: 20
             periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 6
       volumes:
         - name: enabled-plugins
           configMap:
