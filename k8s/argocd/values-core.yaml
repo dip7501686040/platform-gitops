@@ -22,6 +22,18 @@ notifications:
 redis:
   enabled: true
 
+# Same class of fix as backing-services' rabbitmq.yaml probes, same root
+# cause: every one of these defaults to timeoutSeconds: 1 chart-side --
+# confirmed live, under real load (a Jenkins/observability rollout running
+# concurrently) argocd-server and repoServer both crash-looped on failed
+# liveness probes (22 and 16 restarts respectively) even though neither
+# was actually broken, just briefly slow to answer. controller's own
+# readinessProbe timed out the same way without restarting it (readiness
+# failures don't trigger a kill the way liveness ones do), which still
+# knocked it out of Service endpoints while under load. 10s/6 gives real
+# headroom without masking a genuine hang (6 x 10s period = 60s of
+# sustained failure before anything gets killed, same tradeoff already
+# made for RabbitMQ).
 controller:
   resources:
     requests:
@@ -30,6 +42,12 @@ controller:
     limits:
       cpu: 250m
       memory: 512Mi
+  readinessProbe:
+    timeoutSeconds: 10
+    failureThreshold: 6
+  livenessProbe:
+    timeoutSeconds: 10
+    failureThreshold: 6
 
 repoServer:
   resources:
@@ -39,6 +57,12 @@ repoServer:
     limits:
       cpu: 250m
       memory: 256Mi
+  readinessProbe:
+    timeoutSeconds: 10
+    failureThreshold: 6
+  livenessProbe:
+    timeoutSeconds: 10
+    failureThreshold: 6
 
 server:
   resources:
@@ -48,6 +72,12 @@ server:
     limits:
       cpu: 100m
       memory: 128Mi
+  readinessProbe:
+    timeoutSeconds: 10
+    failureThreshold: 6
+  livenessProbe:
+    timeoutSeconds: 10
+    failureThreshold: 6
   # No Ingress/LoadBalancer in this dev setup — reach the UI via
   # `kubectl port-forward svc/argocd-server -n argocd 8080:443`.
   service:
