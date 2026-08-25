@@ -64,6 +64,15 @@ spec:
   # many migration Jobs concurrently, the same class of CPU spike this was
   # meant to fix, just moved from "every pod restart" to "every multi-service
   # deploy" instead of eliminated.
+  #
+  # maxUpdate: "1", not "2" -- confirmed live, "2" still let batch
+  # boundaries overlap (batch N's slower member still finishing its
+  # PreSync migrate Job while batch N+1 already started its own), seen as
+  # three prisma migrate deploy processes running concurrently at once
+  # despite the bound. "1" removes the overlap window entirely: the next
+  # Application's sync (and its PreSync hook) can't start until the
+  # current one's sync operation has fully finished, not just until a
+  # slot frees up mid-way.
   strategy:
     type: RollingSync
     rollingSync:
@@ -72,4 +81,4 @@ spec:
             - key: rollout-group
               operator: In
               values: [nest-services]
-          maxUpdate: "2"
+          maxUpdate: "1"
