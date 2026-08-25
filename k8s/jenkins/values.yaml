@@ -82,6 +82,19 @@ controller:
     enabled: true
     storageClass: ""
     size: 4Gi
+    # helm-unstick.sh (platform-infrastructure/scripts) recovers a Jenkins
+    # release stuck pending-install/-upgrade/-rollback by `helm uninstall`ing
+    # it so the next install starts clean -- confirmed live, that took this
+    # PVC out with it (the chart templates it as a normal chart resource,
+    # not a StatefulSet volumeClaimTemplate, so uninstall deletes it same as
+    # any other release resource), wiping JENKINS_HOME -- build history,
+    # anything configured through the UI outside Terraform/git -- on every
+    # stuck-release recovery, not just genuine reinstalls. This annotation
+    # is Helm's own protection for exactly this: skip this resource on
+    # delete/uninstall, so a StatefulSet recreated after the wipe rebinds to
+    # its still-existing PVC instead of getting a fresh empty one.
+    annotations:
+      helm.sh/resource-policy: keep
 
   serviceType: ClusterIP
 
