@@ -25,6 +25,37 @@ spec:
         prometheus.io/path: "/metrics"
       {{- end }}
     spec:
+      {{- if or .Values.dependsOn.rabbitmq .Values.database.enabled }}
+      # busybox, not this service's own image -- these need nothing but a
+      # TCP-connect check, and using the app image here would mean paying
+      # its full pull/start cost twice (once to wait, once to actually run)
+      # for no benefit.
+      initContainers:
+        {{- if .Values.dependsOn.rabbitmq }}
+        - name: wait-for-rabbitmq
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z -w2 {{ .Values.rabbitmqHost }} {{ .Values.rabbitmqPort }}; do
+                echo "waiting for {{ .Values.rabbitmqHost }}:{{ .Values.rabbitmqPort }}..."
+                sleep 2
+              done
+        {{- end }}
+        {{- if .Values.database.enabled }}
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z -w2 {{ .Values.postgresHost }} 5432; do
+                echo "waiting for {{ .Values.postgresHost }}:5432..."
+                sleep 2
+              done
+        {{- end }}
+      {{- end }}
       containers:
         - name: {{ .Release.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -74,6 +105,15 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+          {{- /*
+          Same class of fix as backing-services' rabbitmq.yaml and ArgoCD's
+          values-core.yaml: timeoutSeconds defaulted to Kubernetes' bare 1s
+          minimum here too, unset like the others were. Under real load
+          (several services cold-starting together) a 1s-timeout probe can
+          kill an otherwise-fine pod just for answering slightly late, which
+          only adds to the CPU spike this whole file's initContainers are
+          trying to reduce, not help it.
+          */ -}}
           {{- if .Values.httpPort }}
           livenessProbe:
             httpGet:
@@ -81,23 +121,31 @@ spec:
               port: {{ .Values.httpPort }}
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           readinessProbe:
             httpGet:
               path: {{ .Values.httpHealthPath }}
               port: {{ .Values.httpPort }}
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           {{- else }}
           livenessProbe:
             grpc:
               port: {{ .Values.healthGrpcPort }}
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           readinessProbe:
             grpc:
               port: {{ .Values.healthGrpcPort }}
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

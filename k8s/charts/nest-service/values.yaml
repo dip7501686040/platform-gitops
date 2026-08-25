@@ -36,6 +36,21 @@ database:
 
 postgresHost: postgres
 
+# Almost every nest-service publishes/consumes over RabbitMQ (see
+# packages/rabbitmq/src/rabbitmq.service.ts's consume(), used pervasively --
+# confirmed live, api-gateway/analytics-service/etc. all hard-crashed with
+# ENOTFOUND rabbitmq when it wasn't up yet, not a graceful retry). An
+# initContainer waits for it to be reachable before the app container
+# starts, turning that crash-loop into a plain "Init:0/1, still waiting"
+# state instead -- same outcome, far less wasted CPU from repeated failed
+# boot attempts (JVM/Node startup cost paid once it can actually succeed,
+# not on every backoff retry). Override to false in a specific service's
+# values file for the rare one that genuinely doesn't touch RabbitMQ.
+dependsOn:
+  rabbitmq: true
+rabbitmqHost: rabbitmq
+rabbitmqPort: 5672
+
 # Off by default -- packages/telemetry's opt-in Prometheus /metrics
 # endpoint (METRICS_PROMETHEUS_PORT). api-gateway turns this on in its own
 # environment values file; every other nest-service is unaffected.
