@@ -75,28 +75,39 @@ controller:
     startupProbe:
       failureThreshold: 90
 
+  serviceType: ClusterIP
+
+# NOT nested under controller: -- confirmed against the chart's own source
+# (templates/home-pvc.yaml reads .Values.persistence directly), unlike
+# probes.startupProbe above, which genuinely does live under controller.
+# Getting this wrong doesn't error (Helm merges unknown keys in silently)
+# and doesn't even look broken -- persistence.enabled defaults to true
+# chart-side, so a PVC still gets created either way, just with none of
+# this block's own settings (size, storageClass, annotations) ever taking
+# effect. Caught only because the annotations key below stopped mattering:
+# see its own comment for what that silently cost.
+persistence:
   # "" uses the cluster's default StorageClass — same convention as
   # k8s/charts/backing-services/values.yaml (Floci's k3s ships local-path
   # as the default; real AWS would use the gp3 class created there).
-  persistence:
-    enabled: true
-    storageClass: ""
-    size: 4Gi
-    # helm-unstick.sh (platform-infrastructure/scripts) recovers a Jenkins
-    # release stuck pending-install/-upgrade/-rollback by `helm uninstall`ing
-    # it so the next install starts clean -- confirmed live, that took this
-    # PVC out with it (the chart templates it as a normal chart resource,
-    # not a StatefulSet volumeClaimTemplate, so uninstall deletes it same as
-    # any other release resource), wiping JENKINS_HOME -- build history,
-    # anything configured through the UI outside Terraform/git -- on every
-    # stuck-release recovery, not just genuine reinstalls. This annotation
-    # is Helm's own protection for exactly this: skip this resource on
-    # delete/uninstall, so a StatefulSet recreated after the wipe rebinds to
-    # its still-existing PVC instead of getting a fresh empty one.
-    annotations:
-      helm.sh/resource-policy: keep
-
-  serviceType: ClusterIP
+  enabled: true
+  storageClass: ""
+  size: 4Gi
+  # helm-unstick.sh (platform-infrastructure/scripts) recovers a Jenkins
+  # release stuck pending-install/-upgrade/-rollback by `helm uninstall`ing
+  # it so the next install starts clean -- confirmed live, that took this
+  # PVC out with it (the chart templates it as a normal chart resource,
+  # not a StatefulSet volumeClaimTemplate, so uninstall deletes it same as
+  # any other release resource), wiping JENKINS_HOME -- build history,
+  # anything configured through the UI outside Terraform/git -- on every
+  # stuck-release recovery, not just genuine reinstalls. This annotation
+  # is Helm's own protection for exactly this: skip this resource on
+  # delete/uninstall, so a StatefulSet recreated after the wipe rebinds to
+  # its still-existing PVC instead of getting a fresh empty one. Confirmed
+  # only effective once actually read from the right place (see above) --
+  # the first attempt at this fix silently no-op'd nested under controller.
+  annotations:
+    helm.sh/resource-policy: keep
 
 # rbac.create + controller.serviceAccount defaults already grant the
 # controller's own service account permission to create/list/delete pods in
