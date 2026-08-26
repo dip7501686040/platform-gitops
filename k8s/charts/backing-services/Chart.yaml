@@ -1,5 +1,0 @@
-apiVersion: v2
-name: backing-services
-description: Postgres, RabbitMQ, and Redis for ai-notification-system (self-contained, no external chart dependencies)
-type: application
-version: 0.1.0

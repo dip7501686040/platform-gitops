@@ -78,7 +78,15 @@ server:
   livenessProbe:
     timeoutSeconds: 10
     failureThreshold: 6
-  # No Ingress/LoadBalancer in this dev setup — reach the UI via
-  # `kubectl port-forward svc/argocd-server -n argocd 8080:443`.
+  # --insecure: serves plain HTTP on 8080 instead of HTTPS on 8443/redirect.
+  # Needed so the argocd cluster's ALB (HTTP-only target groups/listeners,
+  # same as every other ALB this project emulates via Floci) can actually
+  # front it -- an HTTP listener can't forward to an HTTPS-only backend.
+  # No real trust boundary here to give up (self-signed cert either way, on
+  # a purely local dev cluster). Reached via a hand-written NodePort Service
+  # (main.tf's argocd_nodeport_service) + module.loadbalancer_argocd -- no
+  # kubectl port-forward tunnel anymore.
+  extraArgs:
+    - --insecure
   service:
     type: ClusterIP

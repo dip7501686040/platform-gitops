@@ -17,7 +17,10 @@ spec:
       targetRevision: main
       ref: values
   destination:
-    server: https://kubernetes.default.svc
+    # See prediction-service.yaml's comment: ArgoCD now runs on its own
+    # cluster and manages app_services remotely as registered cluster
+    # "app-services".
+    name: app-services
     namespace: ai-notification
   syncPolicy:
     automated:

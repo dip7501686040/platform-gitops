@@ -17,7 +17,12 @@ spec:
       targetRevision: main
       ref: values
   destination:
-    server: https://kubernetes.default.svc
+    # ArgoCD itself now lives on its own cluster (platform-infrastructure's
+    # argocd cluster) and manages app_services remotely -- registered as
+    # "app-services" by main.tf's argocd_register_app_services. `name:`
+    # here, not `server: https://kubernetes.default.svc` (which only ever
+    # meant "this same cluster ArgoCD is running on", not true anymore).
+    name: app-services
     namespace: ai-notification
   syncPolicy:
     automated:
