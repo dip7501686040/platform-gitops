@@ -1,6 +1,6 @@
 image:
   repository: 172.17.0.3:5000/ai-notification/web
-  tag: "fdf7fc54"
+  tag: "0d1c08b3"
 
 serviceType: NodePort
 nodePort: 30080
