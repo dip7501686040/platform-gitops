@@ -29,17 +29,25 @@ spec:
               value: "{{ .Values.port }}"
             - name: GRPC_PORT
               value: "{{ .Values.grpcHealthPort }}"
+          # timeoutSeconds/failureThreshold match nest-service's own
+          # deployment.yaml -- see web/templates/deployment.yaml's comment
+          # on the same change for why (Kubernetes' bare defaults are far
+          # too tight for "briefly slow under load", not "actually broken").
           livenessProbe:
             httpGet:
               path: /health
               port: {{ .Values.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           readinessProbe:
             httpGet:
               path: /health
               port: {{ .Values.port }}
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
