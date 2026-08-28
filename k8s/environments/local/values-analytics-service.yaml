@@ -7,5 +7,6 @@ appGrpcPort: 50160
 appGrpcPortEnvName: ANALYTICS_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: analytics_db

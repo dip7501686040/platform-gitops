@@ -9,5 +9,6 @@ appGrpcPort: 50159
 appGrpcPortEnvName: TEMPLATE_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: template_db

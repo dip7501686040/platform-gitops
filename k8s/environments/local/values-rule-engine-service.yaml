@@ -7,5 +7,6 @@ appGrpcPort: 50156
 appGrpcPortEnvName: RULE_ENGINE_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: rule_engine_db
