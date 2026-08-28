@@ -10,15 +10,32 @@
 # from pod lifecycle entirely; nest-services-local.yaml's RollingSync
 # strategy bounds concurrency for the case where a real multi-service
 # deploy still lands several of these at once.
+#
+# Still ran on EVERY sync though, even ones with no schema change at all
+# (any image tag bump -- an unrelated code fix, no Prisma changes -- is a
+# sync too). Name embeds a hash of the service's own prisma/schema.prisma
+# (computed once in Jenkins, the only place that actually has that file --
+# see platform-gitops/jenkins/Jenkinsfile's per-service build step -- and
+# written into this chart's values.database.schemaHash), so a sync where
+# the schema is unchanged re-applies a Job with the exact name+spec that
+# already exists and already succeeded -- a genuine no-op to Kubernetes
+# (Job specs are immutable; kubectl apply of an identical spec against an
+# existing object does nothing), not a new Pod. Only an actual schema
+# change produces a new name, hence a genuinely new Job that actually runs.
+# hook-delete-policy: HookFailed only, not HookSucceeded -- a *successful*
+# Job has to stick around for that no-op comparison on the next sync to
+# work at all; a *failed* one still gets cleaned up so a real retry (same
+# hash, e.g. after fixing a transient DB connectivity issue) has an object
+# to recreate instead of being permanently stuck on a dead failed Job.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: "{{ .Release.Name }}-migrate"
+  name: "{{ .Release.Name }}-migrate-{{ .Values.database.schemaHash | default "initial" | trunc 12 }}"
   labels:
     {{- include "nest-service.labels" . | nindent 4 }}
   annotations:
     argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/hook-delete-policy: HookFailed
 spec:
   backoffLimit: 2
   template:

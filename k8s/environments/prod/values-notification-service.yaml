@@ -9,5 +9,6 @@ appGrpcPort: 50157
 appGrpcPortEnvName: NOTIFICATION_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: notification_db

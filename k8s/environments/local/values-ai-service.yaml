@@ -7,5 +7,6 @@ appGrpcPort: 50155
 appGrpcPortEnvName: AI_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: ai_db

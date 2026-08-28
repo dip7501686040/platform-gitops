@@ -9,5 +9,6 @@ appGrpcPort: 50161
 appGrpcPortEnvName: AUDIT_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: audit_db

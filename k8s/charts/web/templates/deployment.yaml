@@ -25,17 +25,30 @@ spec:
           env:
             - name: PORT
               value: "{{ .Values.port }}"
+          # timeoutSeconds/failureThreshold match nest-service's own
+          # deployment.yaml -- confirmed live, without these this chart fell
+          # back to Kubernetes' own defaults (timeoutSeconds: 1,
+          # failureThreshold: 3, ~30s total tolerance), which made web the
+          # single most-restarted pod (22 restarts) during a CPU-contention
+          # spike that every other service tolerated fine. A 1s timeout is
+          # far too tight for "briefly slow to respond", not "actually
+          # broken" -- exactly the amplification this change is meant to
+          # remove.
           livenessProbe:
             httpGet:
               path: {{ .Values.healthPath }}
               port: {{ .Values.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           readinessProbe:
             httpGet:
               path: {{ .Values.healthPath }}
               port: {{ .Values.port }}
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

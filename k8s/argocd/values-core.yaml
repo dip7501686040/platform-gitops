@@ -12,6 +12,13 @@
 applicationSet:
   extraArgs:
     - --enable-progressive-syncs
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 256Mi
 
 dex:
   enabled: false
@@ -19,8 +26,24 @@ dex:
 notifications:
   enabled: false
 
+# redis is the one component here that ran with no cpu limit at all until
+# now -- confirmed live it's a real gap, not just theoretical: a cluster
+# hosting genuinely concurrent, continuously-serving Deployments can
+# saturate its Docker-level CPU cap even with every OTHER pod "small" on
+# paper, because nothing bounded this one. Same class of gap Grafana hit on
+# the observability cluster (see platform-infrastructure's
+# scripts/cpu-priority.sh for that story) before it got a limit too -- this
+# is the pod-level half of the same fix, applied here before it actually
+# causes a live incident rather than after.
 redis:
   enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi
 
 # Same class of fix as backing-services' rabbitmq.yaml probes, same root
 # cause: every one of these defaults to timeoutSeconds: 1 chart-side --

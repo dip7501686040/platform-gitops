@@ -7,5 +7,6 @@ appGrpcPort: 50154
 appGrpcPortEnvName: EVENT_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: event_db

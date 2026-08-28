@@ -252,9 +252,35 @@ pipeline {
             }
 
             def valuesFile = "k8s/environments/${env.K8S_ENV}/values-${svc}.yaml"
+            // schemaHash: a content hash of this service's own
+            // prisma/schema.prisma, written into values.database.schemaHash
+            // -- the nest-service chart's migrate-job.yaml embeds it in the
+            // PreSync migrate Job's own name, so a build with an unchanged
+            // schema (the overwhelmingly common case -- most commits touch
+            // code, not the DB schema) produces the exact same Job name+spec
+            // as last time, which ArgoCD's next sync just re-applies as a
+            // genuine no-op instead of actually re-running `prisma migrate
+            // deploy`. Only computed/written when a schema.prisma actually
+            // exists for this service -- matches values.database.enabled,
+            // which is what gates the migrate Job's existence at all.
+            // Every database.enabled=true values file already has a
+            // schemaHash: placeholder line committed (a one-time, manual
+            // seed -- see platform-gitops git history) specifically so this
+            // step only ever needs the same proven update-an-existing-line
+            // sed pattern repository/tag already use above, never a
+            // conditional insert-if-missing. That style of sed ('a\' plus a
+            // multi-line continuation) is exactly what broke
+            // platform-infrastructure's registries.yaml earlier this same
+            // project -- not worth the same risk twice for what's a
+            // one-time seed either way.
+            def schemaFile = "src/apps/${svc}/prisma/schema.prisma"
             sh """
               sed -i "s|^\\(\\s*repository:\\).*|\\1 ${env.ECR_REGISTRY}/${svc}|" ${valuesFile}
               sed -i "s|^\\(\\s*tag:\\).*|\\1 \\"${env.GIT_SHA}\\"|" ${valuesFile}
+              if [ -f "${schemaFile}" ]; then
+                SCHEMA_HASH=\$(sha256sum "${schemaFile}" | cut -c1-12)
+                sed -i "s|^\\(\\s*schemaHash:\\).*|\\1 \\"\$SCHEMA_HASH\\"|" ${valuesFile}
+              fi
               git add ${valuesFile}
               git commit -m "ci: bump image tag for ${svc} to ${env.GIT_SHA}"
             """

@@ -7,5 +7,6 @@ appGrpcPort: 50153
 appGrpcPortEnvName: TENANT_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: tenant_db

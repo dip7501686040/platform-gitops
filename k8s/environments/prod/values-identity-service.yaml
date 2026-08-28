@@ -9,5 +9,6 @@ appGrpcPort: 50152
 appGrpcPortEnvName: AUTH_GRPC_PORT
 
 database:
+  schemaHash: "initial"
   enabled: true
   name: identity_db
