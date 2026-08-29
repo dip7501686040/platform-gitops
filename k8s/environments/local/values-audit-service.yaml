@@ -1,12 +1,12 @@
 image:
-  repository: 172.17.0.3:5000/ai-notification/audit-service
-  tag: "0d1c08b3"
+  repository: 172.30.0.20:5000/ai-notification/audit-service
+  tag: "70980d08"
 
 healthGrpcPort: 50061
 appGrpcPort: 50161
 appGrpcPortEnvName: AUDIT_GRPC_PORT
 
 database:
-  schemaHash: "initial"
+  schemaHash: "fc0a4b010b3a"
   enabled: true
   name: audit_db
