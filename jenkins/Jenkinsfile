@@ -109,6 +109,14 @@ pipeline {
   // `docker` CLI and the host daemon socket mounted (no k8s build agents).
   agent any
 
+  environment {
+    // The app Dockerfiles use BuildKit-only syntax (`# syntax=`,
+    // `RUN --mount=type=cache`). The image ships the monolithic `docker`
+    // client with no buildx plugin, so force the daemon's embedded
+    // BuildKit explicitly rather than relying on it being the default.
+    DOCKER_BUILDKIT = '1'
+  }
+
   options {
     disableConcurrentBuilds()
   }
