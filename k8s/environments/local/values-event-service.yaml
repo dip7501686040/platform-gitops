@@ -1,12 +1,12 @@
 image:
-  repository: 172.17.0.3:5000/ai-notification/event-service
-  tag: "0d1c08b3"
+  repository: 172.30.0.20:5000/ai-notification/event-service
+  tag: "70980d08"
 
 healthGrpcPort: 50054
 appGrpcPort: 50154
 appGrpcPortEnvName: EVENT_GRPC_PORT
 
 database:
-  schemaHash: "initial"
+  schemaHash: "cc25347d8c9b"
   enabled: true
   name: event_db
