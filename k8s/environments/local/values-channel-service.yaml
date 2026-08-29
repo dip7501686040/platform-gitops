@@ -1,6 +1,6 @@
 image:
-  repository: 172.17.0.3:5000/ai-notification/channel-service
-  tag: "0d1c08b3"
+  repository: 172.30.0.20:5000/ai-notification/channel-service
+  tag: "70980d08"
 
 healthGrpcPort: 50058
 # No app-facing gRPC port — channel-service is a pure RabbitMQ worker.
