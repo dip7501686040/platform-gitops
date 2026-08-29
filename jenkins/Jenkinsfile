@@ -27,11 +27,12 @@
 // concurrent load (see platform-infrastructure/main.tf's sequencing notes).
 //
 // Every image is pushed to TWO registries:
-//   1. the Floci ECR emulator (${ECR_REGISTRY}) — what the k8s manifests
-//      reference and what ArgoCD deploys from locally. Wiped whenever the
-//      Floci containers are torn down.
-//   2. Docker Hub (${DOCKERHUB_NAMESPACE}/ai-notification-<svc>) — a
-//      durable off-box copy, so a Floci wipe doesn't force a rebuild of
+//   1. the Floci ECR emulator — pushed via ${ECR_PUSH_REGISTRY} (its
+//      published host port), recorded in values-*.yaml as ${ECR_REGISTRY}
+//      (the in-cluster pull address). What ArgoCD deploys from locally;
+//      wiped whenever the Floci containers are torn down.
+//   2. Docker Hub — ${DOCKERHUB_REPO}:<svc>-<sha>, one shared public repo.
+//      A durable off-box copy so a Floci wipe doesn't force a rebuild of
 //      all 13 services. Not referenced by any manifest; purely a cache.
 
 def SOURCE_REPO_URL = 'https://github.com/dip7501686040/ai-notification-system.git'
@@ -150,7 +151,7 @@ pipeline {
           // address and the pull address are the same real ECR endpoint).
           env.ECR_PUSH_REGISTRY   = sh(script: "grep '^ECR_PUSH_REGISTRY=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim() ?: env.ECR_REGISTRY
           env.K8S_ENV             = sh(script: "grep '^K8S_ENV='             ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
-          env.DOCKERHUB_NAMESPACE = sh(script: "grep '^DOCKERHUB_NAMESPACE=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.DOCKERHUB_REPO      = sh(script: "grep '^DOCKERHUB_REPO='      ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
           // The image tag must track the *source* repo's commit, not this
           // (platform-gitops) repo's — GIT_COMMIT here would be the latter.
           env.GIT_SHA = sh(script: "git -C src rev-parse --short=8 HEAD", returnStdout: true).trim()
@@ -192,7 +193,9 @@ pipeline {
             // Mac-side `docker push` can't route to (Docker Desktop won't
             // reach a custom bridge's container IPs). Same registry/blobs.
             def ecrPushImage = "${env.ECR_PUSH_REGISTRY}/${svc}:${env.GIT_SHA}"
-            def hubImage = "${env.DOCKERHUB_NAMESPACE}/ai-notification-${svc}:${env.GIT_SHA}"
+            // One shared Docker Hub repo, service in the tag (see
+            // DOCKERHUB_REPO in local.properties for why not 13 repos).
+            def hubImage = "${env.DOCKERHUB_REPO}:${svc}-${env.GIT_SHA}"
             def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg ${k}=${v}" }.join(' ')
 
             // Both tags in one build so the two pushes are the same bytes.
@@ -216,8 +219,22 @@ pipeline {
             """
 
             // Docker Hub first — the durable copy. Non-negotiable; a
-            // failure here fails the build.
-            sh "docker push ${hubImage}"
+            // failure after the retries fails the build. Retried because
+            // Docker Hub can briefly 429 / return a transient auth error
+            // under load.
+            sh """
+              for attempt in 1 2 3 4 5; do
+                if docker push ${hubImage}; then
+                  break
+                fi
+                if [ "\$attempt" = "5" ]; then
+                  echo "Docker Hub push failed after 5 attempts" >&2
+                  exit 1
+                fi
+                echo "Docker Hub push attempt \$attempt failed — retrying in 15s"
+                sleep 15
+              done
+            """
 
             // Floci ECR second. Retry a few times -- Floci provisions its
             // registry lazily and this project has hit registry churn
