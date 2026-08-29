@@ -279,7 +279,14 @@ pipeline {
                 sed -i "s|^\\(\\s*schemaHash:\\).*|\\1 \\"\$SCHEMA_HASH\\"|" ${valuesFile}
               fi
               git add ${valuesFile}
-              git commit -m "ci: bump image tag for ${svc} to ${env.GIT_SHA}"
+              # No-op when the values file is already at this repo+tag+hash
+              # (a re-run of an already-built service, or a rebuild at the
+              # same source commit) -- that's success, not a build failure.
+              if git diff --cached --quiet -- ${valuesFile}; then
+                echo "${valuesFile} already current for ${svc} @ ${env.GIT_SHA} -- nothing to commit."
+              else
+                git commit -m "ci: bump image tag for ${svc} to ${env.GIT_SHA}"
+              fi
             """
           }
         }
