@@ -116,6 +116,13 @@ pipeline {
     // client with no buildx plugin, so force the daemon's embedded
     // BuildKit explicitly rather than relying on it being the default.
     DOCKER_BUILDKIT = '1'
+    // Per-build Docker config dir. Jenkins is one container shared by every
+    // build-<svc> job, so a single ~/.docker/config.json means one build's
+    // post-stage `docker logout` yanks the login out from under any other
+    // build still mid-push (seen live: "insufficient_scope" on a valid
+    // token). $WORKSPACE is per-job and disableConcurrentBuilds() keeps it
+    // to one run, so this is unique per concurrent build.
+    DOCKER_CONFIG = "${WORKSPACE}/.docker-cfg"
   }
 
   options {
@@ -171,7 +178,10 @@ pipeline {
         // seeded into Jenkins' store at boot (platform-infrastructure
         // templates/jenkins/init-security.groovy.tftpl).
         withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
-          sh 'echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin'
+          sh '''
+            mkdir -p "$DOCKER_CONFIG"
+            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+          '''
         }
       }
     }
@@ -322,7 +332,8 @@ pipeline {
 
   post {
     always {
-      sh 'docker logout || true'
+      // Only touches this build's own DOCKER_CONFIG, not a shared one.
+      sh 'docker logout || true; rm -rf "$DOCKER_CONFIG" || true'
     }
   }
 }
