@@ -1,12 +1,12 @@
 image:
-  repository: 172.17.0.3:5000/ai-notification/rule-engine-service
-  tag: "0d1c08b3"
+  repository: 172.30.0.20:5000/ai-notification/rule-engine-service
+  tag: "70980d08"
 
 healthGrpcPort: 50056
 appGrpcPort: 50156
 appGrpcPortEnvName: RULE_ENGINE_GRPC_PORT
 
 database:
-  schemaHash: "initial"
+  schemaHash: "9d3450791f43"
   enabled: true
   name: rule_engine_db
