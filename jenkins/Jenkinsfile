@@ -14,15 +14,25 @@
 // control — see the tag-bump push step below for the one place that still
 // needs a credential (write access).
 //
-// Builds via kaniko, not `docker build`/`docker push` directly: Jenkins now
-// runs as a Kubernetes pod itself (see k8s/jenkins/values.yaml), and the k3s
-// node it schedules onto has no docker.sock to give a build agent — kaniko
-// is the standard way to build/push images from inside a pod with no Docker
-// daemon at all. One kaniko pod at a time, not batched/parallel: this
-// project's whole Floci-based local environment has repeatedly shown it
-// can't absorb concurrent load (see platform-infrastructure/main.tf's own
-// sequencing comments) — simpler and safer than the previous batches-of-2
-// scheme.
+// Builds with plain `docker build` against the host Docker daemon, whose
+// socket is bind-mounted into this Jenkins container (see
+// platform-infrastructure/main.tf's `--- jenkins ---` section and
+// templates/jenkins/Dockerfile). Jenkins used to run as a k8s pod with no
+// docker.sock, which is why the previous version of this file shelled out
+// to kaniko in a k8s build agent — that whole constraint is gone now
+// (plain container + mounted socket), and `docker build` handles the app's
+// BuildKit Dockerfiles (`# syntax=`, `RUN --mount=type=cache`) natively,
+// which kaniko does not. One service at a time, never parallel: this
+// project's local Floci environment has repeatedly shown it can't absorb
+// concurrent load (see platform-infrastructure/main.tf's sequencing notes).
+//
+// Every image is pushed to TWO registries:
+//   1. the Floci ECR emulator (${ECR_REGISTRY}) — what the k8s manifests
+//      reference and what ArgoCD deploys from locally. Wiped whenever the
+//      Floci containers are torn down.
+//   2. Docker Hub (${DOCKERHUB_NAMESPACE}/ai-notification-<svc>) — a
+//      durable off-box copy, so a Floci wipe doesn't force a rebuild of
+//      all 13 services. Not referenced by any manifest; purely a cache.
 
 def SOURCE_REPO_URL = 'https://github.com/dip7501686040/ai-notification-system.git'
 def SOURCE_BRANCH = 'main'
@@ -95,30 +105,12 @@ def BUILD_ORDER = [
 ]
 
 pipeline {
-  agent {
-    kubernetes {
-      yaml '''
-        apiVersion: v1
-        kind: Pod
-        spec:
-          containers:
-          - name: kaniko
-            image: gcr.io/kaniko-project/executor:v1.23.2-debug
-            command: ["sleep"]
-            args: ["99d"]
-            resources:
-              # 512Mi was OOMKilling every build -- confirmed live, kaniko
-              # actually executes the Dockerfile's own build steps
-              # (`pnpm install` + `pnpm turbo run build` for a full NestJS/
-              # TypeScript app), not just a lightweight layer copy, and that
-              # genuinely needs well over 512Mi. Limit raised accordingly;
-              # request stays modest since only one of these runs at a time
-              # (see the Jenkinsfile's own "one service at a time" note).
-              requests: { cpu: 100m, memory: 512Mi }
-              limits: { cpu: 1000m, memory: 2Gi }
-      '''
-      defaultContainer 'jnlp'
-    }
+  // Runs on the Jenkins controller itself — a plain container with the
+  // `docker` CLI and the host daemon socket mounted (no k8s build agents).
+  agent any
+
+  options {
+    disableConcurrentBuilds()
   }
 
   parameters {
@@ -144,18 +136,13 @@ pipeline {
         // plugin set this setup needs.
         script {
           def propsFile = "jenkins/env/${params.ENVIRONMENT}.properties"
-          env.AWS_REGION   = sh(script: "grep '^AWS_REGION='   ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
-          env.ECR_REGISTRY = sh(script: "grep '^ECR_REGISTRY=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
-          env.K8S_ENV       = sh(script: "grep '^K8S_ENV='      ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.AWS_REGION          = sh(script: "grep '^AWS_REGION='          ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.ECR_REGISTRY        = sh(script: "grep '^ECR_REGISTRY='        ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.K8S_ENV             = sh(script: "grep '^K8S_ENV='             ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          env.DOCKERHUB_NAMESPACE = sh(script: "grep '^DOCKERHUB_NAMESPACE=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
           // The image tag must track the *source* repo's commit, not this
           // (platform-gitops) repo's — GIT_COMMIT here would be the latter.
           env.GIT_SHA = sh(script: "git -C src rev-parse --short=8 HEAD", returnStdout: true).trim()
-          // Full SHA, not the short one above -- kaniko's own git-context
-          // fetch (see the Build + push stage) needs an unambiguous ref to
-          // resolve, and an 8-char abbreviation risks collision/ambiguity
-          // that the short form (only ever used cosmetically, for the image
-          // tag) doesn't need to worry about.
-          env.GIT_SHA_FULL = sh(script: "git -C src rev-parse HEAD", returnStdout: true).trim()
         }
         // Local (not --global) repo config, set once — needed by every git
         // operation that creates a commit, including the rebase replay in
@@ -167,14 +154,21 @@ pipeline {
           git config user.name jenkins
           git config user.email jenkins@ai-notification.local
         '''
+        // One `docker login` for the whole run — the tag-bump-only `prod`
+        // path still benefits (harmless no-op if never pushing). Credential
+        // seeded into Jenkins' store at boot (platform-infrastructure
+        // templates/jenkins/init-security.groovy.tftpl).
+        withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
+          sh 'echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin'
+        }
       }
     }
 
-    stage('Build + push (kaniko, one service at a time)') {
+    stage('Build + push (one service at a time)') {
       steps {
         script {
           def requested = params.SERVICES.trim() == 'all'
-            ? SERVICE_CATALOG.keySet()
+            ? SERVICE_CATALOG.keySet() as List
             : params.SERVICES.split(',').collect { it.trim() }
 
           for (svc in BUILD_ORDER) {
@@ -182,97 +176,65 @@ pipeline {
               continue
             }
             def cfg = SERVICE_CATALOG[svc]
-            def image = "${env.ECR_REGISTRY}/${svc}:${env.GIT_SHA}"
-            // kaniko's --dockerfile (and --context-sub-path below) is
-            // relative to its build context, not the workspace root
-            // (docker build's -f is workspace-root-relative) -- every
-            // catalog entry's dockerfile path already starts with its own
-            // context path, so strip that prefix.
-            def dockerfileInContext = cfg.dockerfile.substring(cfg.context.length() + 1)
-            // cfg.context is 'src' (repo root, from this pipeline's own
-            // dir('src') checkout naming) for every service except
-            // prediction-service ('src/apps/prediction-service') -- kaniko's
-            // git context below clones the repo directly with no 'src/'
-            // wrapper, so 'src' maps to no sub-path at all, and anything
-            // else maps to itself with that prefix stripped.
-            def contextSubPath = cfg.context == 'src' ? '' : cfg.context.substring('src/'.length())
-            def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg=${k}=${v}" }.join(' ')
+            def ecrImage = "${env.ECR_REGISTRY}/${svc}:${env.GIT_SHA}"
+            def hubImage = "${env.DOCKERHUB_NAMESPACE}/ai-notification-${svc}:${env.GIT_SHA}"
+            def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg ${k}=${v}" }.join(' ')
 
-            // A fresh pod per service, not one shared kaniko container
-            // reused across the whole loop -- confirmed live, container
-            // reuse breaks after the very first build: kaniko doesn't just
-            // read the Dockerfile, it actually *executes* it (RUN, COPY,
-            // USER, ...) against its own container's root filesystem to
-            // produce layers, so by the time identity-service's build
-            // finished, the kaniko container's own shell/environment was
-            // already overwritten by node:24-alpine's unpacked layers --
-            // every subsequent `sh` exec into it failed immediately with
-            // "Process exited immediately after creation". kaniko pods are
-            // single-use by design; this respects that instead of fighting
-            // it. Building from kaniko's own git context (not a shared
-            // workspace mount) keeps each pod fully self-contained -- no
-            // volume-sharing complexity, at the cost of a fresh shallow
-            // clone per service, which is cheap next to the actual build.
-            def podLabel = "kaniko-${svc}-${env.BUILD_NUMBER}"
-            podTemplate(
-              label: podLabel,
-              containers: [
-                containerTemplate(
-                  name: 'kaniko',
-                  image: 'gcr.io/kaniko-project/executor:v1.23.2-debug',
-                  command: 'sleep',
-                  args: '99d',
-                  resourceRequestCpu: '100m',
-                  resourceRequestMemory: '512Mi',
-                  resourceLimitCpu: '1000m',
-                  resourceLimitMemory: '2Gi',
-                )
-              ]
-            ) {
-              node(podLabel) {
-                container('kaniko') {
-                  // --insecure/--insecure-pull/--skip-tls-verify: Floci's
-                  // ECR emulation is a plain unauthenticated HTTP registry
-                  // (see jenkins/env/local.properties) -- fine for local,
-                  // but this is NOT how prod's real ECR (proper HTTPS + IAM
-                  // auth) should be pushed to. Deliberately not handled yet
-                  // -- prod-only work is deferred until prod is actually
-                  // being set up.
-                  sh """
-                    /kaniko/executor \
-                      --context=git://${SOURCE_REPO_URL.replaceFirst('^https://', '')}#${env.GIT_SHA_FULL} \
-                      ${contextSubPath ? "--context-sub-path=${contextSubPath}" : ''} \
-                      --dockerfile=${dockerfileInContext} \
-                      ${buildArgFlags} \
-                      --destination=${image} \
-                      --insecure --insecure-pull --skip-tls-verify
-                  """
-                }
-              }
-            }
+            // Both tags in one build so the two pushes are the same bytes.
+            // `-f` is CWD-relative (not context-relative like kaniko was);
+            // the catalog's dockerfile paths already include the 'src/'
+            // prefix, and the context is a real path in this container's
+            // workspace (the dir('src') checkout above) — `docker build`
+            // streams that context to the daemon over the socket, so it
+            // doesn't matter that $JENKINS_HOME is a named volume.
+            sh """
+              docker build \
+                -f ${cfg.dockerfile} \
+                ${buildArgFlags} \
+                -t ${hubImage} \
+                -t ${ecrImage} \
+                ${cfg.context}
+            """
+
+            // Docker Hub first — the durable copy. Non-negotiable; a
+            // failure here fails the build.
+            sh "docker push ${hubImage}"
+
+            // Floci ECR second. Floci provisions its registry container
+            // lazily and this project has hit registry-address churn
+            // repeatedly (see platform-infrastructure notes), so retry a
+            // few times before giving up.
+            sh """
+              for attempt in 1 2 3 4 5; do
+                if docker push ${ecrImage}; then
+                  break
+                fi
+                if [ "\$attempt" = "5" ]; then
+                  echo "ECR push failed after 5 attempts — ${hubImage} is safe on Docker Hub; re-run once the Floci ECR registry is reachable." >&2
+                  exit 1
+                fi
+                echo "ECR push attempt \$attempt failed — retrying in 10s"
+                sleep 10
+              done
+            """
+
+            // Free the local layer store — 13 full NestJS images on an 8GB
+            // Mac otherwise fills the Docker Desktop VM disk mid-run. The
+            // registries hold the real copies now.
+            sh "docker image rm ${hubImage} ${ecrImage} || true"
 
             def valuesFile = "k8s/environments/${env.K8S_ENV}/values-${svc}.yaml"
             // schemaHash: a content hash of this service's own
             // prisma/schema.prisma, written into values.database.schemaHash
-            // -- the nest-service chart's migrate-job.yaml embeds it in the
+            // — the nest-service chart's migrate-job.yaml embeds it in the
             // PreSync migrate Job's own name, so a build with an unchanged
-            // schema (the overwhelmingly common case -- most commits touch
-            // code, not the DB schema) produces the exact same Job name+spec
-            // as last time, which ArgoCD's next sync just re-applies as a
-            // genuine no-op instead of actually re-running `prisma migrate
-            // deploy`. Only computed/written when a schema.prisma actually
-            // exists for this service -- matches values.database.enabled,
-            // which is what gates the migrate Job's existence at all.
-            // Every database.enabled=true values file already has a
-            // schemaHash: placeholder line committed (a one-time, manual
-            // seed -- see platform-gitops git history) specifically so this
-            // step only ever needs the same proven update-an-existing-line
-            // sed pattern repository/tag already use above, never a
-            // conditional insert-if-missing. That style of sed ('a\' plus a
-            // multi-line continuation) is exactly what broke
-            // platform-infrastructure's registries.yaml earlier this same
-            // project -- not worth the same risk twice for what's a
-            // one-time seed either way.
+            // schema (the common case) produces the same Job name+spec as
+            // last time, which ArgoCD's next sync re-applies as a no-op
+            // instead of re-running `prisma migrate deploy`. Only
+            // computed/written when a schema.prisma actually exists for
+            // this service. Every database.enabled=true values file already
+            // has a schemaHash: placeholder line committed, so this only
+            // ever updates an existing line, never inserts.
             def schemaFile = "src/apps/${svc}/prisma/schema.prisma"
             sh """
               sed -i "s|^\\(\\s*repository:\\).*|\\1 ${env.ECR_REGISTRY}/${svc}|" ${valuesFile}
@@ -292,8 +254,7 @@ pipeline {
     stage('Push tag-bump commits') {
       steps {
         // github-push credential is seeded automatically into Jenkins' own
-        // credential store at startup (see k8s/jenkins/values.yaml's
-        // initScripts) — nothing manual needed here.
+        // credential store at startup — nothing manual needed here.
         //
         // Rebase-and-retry rather than a bare push: this branch can move
         // between checkout and push (another build, or a human pushing
@@ -314,6 +275,12 @@ pipeline {
           '''
         }
       }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker logout || true'
     }
   }
 }
