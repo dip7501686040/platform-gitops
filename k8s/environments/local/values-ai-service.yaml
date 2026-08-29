@@ -1,12 +1,12 @@
 image:
-  repository: 172.17.0.3:5000/ai-notification/ai-service
-  tag: "0d1c08b3"
+  repository: 172.30.0.20:5000/ai-notification/ai-service
+  tag: "70980d08"
 
 healthGrpcPort: 50055
 appGrpcPort: 50155
 appGrpcPortEnvName: AI_GRPC_PORT
 
 database:
-  schemaHash: "initial"
+  schemaHash: "e597c7f086e5"
   enabled: true
   name: ai_db
