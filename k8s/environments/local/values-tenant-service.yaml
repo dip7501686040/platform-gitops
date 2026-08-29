@@ -1,12 +1,12 @@
 image:
-  repository: 172.17.0.3:5000/ai-notification/tenant-service
-  tag: "0d1c08b3"
+  repository: 172.30.0.20:5000/ai-notification/tenant-service
+  tag: "70980d08"
 
 healthGrpcPort: 50053
 appGrpcPort: 50153
 appGrpcPortEnvName: TENANT_GRPC_PORT
 
 database:
-  schemaHash: "initial"
+  schemaHash: "d77d6ee898e2"
   enabled: true
   name: tenant_db
