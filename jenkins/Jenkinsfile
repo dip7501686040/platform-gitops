@@ -146,6 +146,9 @@ pipeline {
           def propsFile = "jenkins/env/${params.ENVIRONMENT}.properties"
           env.AWS_REGION          = sh(script: "grep '^AWS_REGION='          ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
           env.ECR_REGISTRY        = sh(script: "grep '^ECR_REGISTRY='        ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
+          // Falls back to ECR_REGISTRY when unset (e.g. prod, where the push
+          // address and the pull address are the same real ECR endpoint).
+          env.ECR_PUSH_REGISTRY   = sh(script: "grep '^ECR_PUSH_REGISTRY=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim() ?: env.ECR_REGISTRY
           env.K8S_ENV             = sh(script: "grep '^K8S_ENV='             ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
           env.DOCKERHUB_NAMESPACE = sh(script: "grep '^DOCKERHUB_NAMESPACE=' ${propsFile} | cut -d= -f2-", returnStdout: true).trim()
           // The image tag must track the *source* repo's commit, not this
@@ -184,7 +187,11 @@ pipeline {
               continue
             }
             def cfg = SERVICE_CATALOG[svc]
-            def ecrImage = "${env.ECR_REGISTRY}/${svc}:${env.GIT_SHA}"
+            // Push address (host-published port of the Floci registry) --
+            // NOT env.ECR_REGISTRY, which is the in-cluster pull address a
+            // Mac-side `docker push` can't route to (Docker Desktop won't
+            // reach a custom bridge's container IPs). Same registry/blobs.
+            def ecrPushImage = "${env.ECR_PUSH_REGISTRY}/${svc}:${env.GIT_SHA}"
             def hubImage = "${env.DOCKERHUB_NAMESPACE}/ai-notification-${svc}:${env.GIT_SHA}"
             def buildArgFlags = cfg.buildArgs.collect { k, v -> "--build-arg ${k}=${v}" }.join(' ')
 
@@ -195,12 +202,16 @@ pipeline {
             // workspace (the dir('src') checkout above) — `docker build`
             // streams that context to the daemon over the socket, so it
             // doesn't matter that $JENKINS_HOME is a named volume.
+            // --provenance/--sbom off: buildx would otherwise push an OCI
+            // image index with attestation manifests, which the plain
+            // registry:2 behind Floci ECR can reject.
             sh """
               docker build \
                 -f ${cfg.dockerfile} \
                 ${buildArgFlags} \
+                --provenance=false --sbom=false \
                 -t ${hubImage} \
-                -t ${ecrImage} \
+                -t ${ecrPushImage} \
                 ${cfg.context}
             """
 
@@ -208,13 +219,12 @@ pipeline {
             // failure here fails the build.
             sh "docker push ${hubImage}"
 
-            // Floci ECR second. Floci provisions its registry container
-            // lazily and this project has hit registry-address churn
-            // repeatedly (see platform-infrastructure notes), so retry a
-            // few times before giving up.
+            // Floci ECR second. Retry a few times -- Floci provisions its
+            // registry lazily and this project has hit registry churn
+            // repeatedly (see platform-infrastructure notes).
             sh """
               for attempt in 1 2 3 4 5; do
-                if docker push ${ecrImage}; then
+                if docker push ${ecrPushImage}; then
                   break
                 fi
                 if [ "\$attempt" = "5" ]; then
@@ -229,7 +239,7 @@ pipeline {
             // Free the local layer store — 13 full NestJS images on an 8GB
             // Mac otherwise fills the Docker Desktop VM disk mid-run. The
             // registries hold the real copies now.
-            sh "docker image rm ${hubImage} ${ecrImage} || true"
+            sh "docker image rm ${hubImage} ${ecrPushImage} || true"
 
             def valuesFile = "k8s/environments/${env.K8S_ENV}/values-${svc}.yaml"
             // schemaHash: a content hash of this service's own
