@@ -27,6 +27,15 @@
 # work at all; a *failed* one still gets cleaned up so a real retry (same
 # hash, e.g. after fixing a transient DB connectivity issue) has an object
 # to recreate instead of being permanently stuck on a dead failed Job.
+#
+# ttlSecondsAfterFinished handles the successful case instead, on a delay
+# rather than immediately -- long enough to `kubectl logs` a just-finished
+# migration if something looks off, short enough that completed Jobs don't
+# pile up as permanent clutter. This does trade away the no-op-comparison
+# optimization for any sync landing after the TTL window (the Job object
+# will already be gone, so an unchanged schema re-runs `prisma migrate
+# deploy` instead of skipping it) -- acceptable, since that command is
+# itself idempotent and cheap to re-check at this deploy cadence (1-2/day).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -38,6 +47,7 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: HookFailed
 spec:
   backoffLimit: 2
+  ttlSecondsAfterFinished: 300
   template:
     metadata:
       labels:
