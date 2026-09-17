@@ -1,14 +1,14 @@
 image:
   # TODO: replace with the real ECR URL once real-AWS Terraform is applied
   # (see terraform outputs.ecr_repository_urls).
-  repository: REPLACE_WITH_REAL_ECR_ACCOUNT.dkr.ecr.REPLACE_WITH_REGION.amazonaws.com/ai-notification/notification-service
-  tag: unset
+  repository: docker.io/dip75016860/ai-notification
+  tag: "notification-service-692720ca"
 
 healthGrpcPort: 50057
 appGrpcPort: 50157
 appGrpcPortEnvName: NOTIFICATION_GRPC_PORT
 
 database:
-  schemaHash: "initial"
+  schemaHash: "d4213e3e116b"
   enabled: true
   name: notification_db
