@@ -1,0 +1,5 @@
+apiVersion: v2
+name: backing-services
+description: Postgres, RabbitMQ, and Redis for the ai-notification-system app tier
+type: application
+version: 0.1.0

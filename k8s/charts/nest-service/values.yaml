@@ -69,11 +69,11 @@ otelExporterOtlpEndpoint: "http://otel-collector-opentelemetry-collector.observa
 
 resources:
   requests:
-    cpu: 50m
-    memory: 128Mi
+    cpu: 30m
+    memory: 96Mi
   limits:
-    cpu: 250m
-    memory: 256Mi
+    cpu: 200m
+    memory: 192Mi
 
 # Arbitrary extra non-secret env vars specific to this service, e.g.
 # downstream *_GRPC_ADDRESS values (rendered as literal strings).

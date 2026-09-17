@@ -12,3 +12,14 @@ database:
   schemaHash: "e597c7f086e5"
   enabled: true
   name: ai_db
+
+# Makes real outbound LLM calls (OpenAI) -- needs headroom for response
+# buffering/streaming, not CPU, unlike the thin CRUD services the chart
+# default now targets.
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    cpu: 300m
+    memory: 512Mi

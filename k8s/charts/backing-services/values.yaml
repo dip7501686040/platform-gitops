@@ -1,0 +1,53 @@
+# Deployed into the SAME namespace as the app services (ai-notification),
+# not a separate "backing" namespace — the nest-service chart's default
+# postgresHost/rabbitmqHost ("postgres", "rabbitmq") are bare Service names,
+# which only resolve via Kubernetes DNS within the same namespace. Splitting
+# namespaces would just mean overriding those hostnames to FQDNs in all 13
+# app values files for no functional benefit at this scale.
+namespace: ai-notification
+
+# All three read their passwords from the same `app-secrets` Secret the
+# app services already use (see k8s/secrets/prod.env.example) — one secret,
+# one place credentials are managed, matching the existing pattern instead
+# of inventing a second one.
+secretName: app-secrets
+
+postgres:
+  # Fully-qualified — OKE's CRI-O runtime enforces "short name" resolution
+  # and refuses to guess the registry for a bare "postgres:16-alpine"
+  # reference (errors as "ambiguous"). Explicit docker.io/library/ avoids it.
+  image: docker.io/library/postgres:16-alpine
+  storageSize: 20Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+
+rabbitmq:
+  image: docker.io/library/rabbitmq:3-management-alpine
+  user: notification
+  # No PVC — matches the local dev docker-compose setup (also ephemeral).
+  # There's no dead-letter-exchange configured yet either way, so durable
+  # queues wouldn't survive a crash cleanly regardless; documented as a
+  # follow-on, not fixed in this pass.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: 250m
+      memory: 384Mi
+
+redis:
+  image: docker.io/library/redis:7-alpine
+  # No PVC — pure cache, matches local dev.
+  resources:
+    requests:
+      cpu: 30m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi

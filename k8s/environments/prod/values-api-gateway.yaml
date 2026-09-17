@@ -7,6 +7,16 @@ image:
 healthGrpcPort: 50051
 httpPort: 8000
 
+# Entry point + HPA target (Phase 7) -- needs more headroom than the thin
+# CRUD services the chart default now targets.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
 database:
   schemaHash: "initial"
   enabled: false
