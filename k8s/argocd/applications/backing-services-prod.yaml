@@ -1,0 +1,30 @@
+# Postgres/RabbitMQ/Redis -- single chart, no per-environment values file
+# (its own values.yaml already carries real defaults, unlike the app charts
+# which need a values-<service>.yaml layered on top).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backing-services
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dip7501686040/platform-gitops.git
+    targetRevision: main
+    path: k8s/charts/backing-services
+    helm:
+      releaseName: backing-services
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-notification
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
