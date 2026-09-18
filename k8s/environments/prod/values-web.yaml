@@ -2,7 +2,7 @@ image:
   # TODO: replace with the real ECR URL once real-AWS Terraform is applied
   # (see terraform outputs.ecr_repository_urls).
   repository: docker.io/dip75016860/ai-notification
-  tag: "web-12c6d459"
+  tag: "web-a6ee50b2"
 
 serviceType: NodePort
 nodePort: 30080
