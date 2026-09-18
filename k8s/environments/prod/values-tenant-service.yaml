@@ -12,3 +12,8 @@ database:
   schemaHash: "d77d6ee898e2"
   enabled: true
   name: tenant_db
+
+env:
+  # Stripe billing redirect links (checkout success/cancel, billing portal
+  # return) were falling back to the code default (localhost:3000).
+  FRONTEND_URL: "https://ainotification.duckdns.org"
