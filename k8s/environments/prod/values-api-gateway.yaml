@@ -33,10 +33,9 @@ metrics:
 env:
   CORS_ORIGINS: "https://ainotification.duckdns.org"
   FRONTEND_URL: "https://ainotification.duckdns.org"
-  # Same Google OAuth client already used for local dev -- not sensitive,
+  # A dedicated OAuth client (separate from the old local-only one) with
+  # both localhost and the prod callback URI authorized. Not sensitive,
   # safe as plain config. GOOGLE_CLIENT_SECRET is sensitive and comes from
-  # the app-secrets Secret (platform-infrastructure's oci/backing-services.tf)
-  # -- currently blank there, so Google sign-in still won't complete the
-  # token exchange until a real secret is filled in and applied.
-  GOOGLE_CLIENT_ID: "38603231523-0jag1il5veuu88keo1p2fhiosos3a4u6.apps.googleusercontent.com"
+  # the app-secrets Secret (platform-infrastructure's oci/backing-services.tf).
+  GOOGLE_CLIENT_ID: "309816405231-5fgb5763tnj6vrv39uhjk49gik41fqlq.apps.googleusercontent.com"
   GOOGLE_CALLBACK_URL: "https://ainotification-api.duckdns.org/auth/google/callback"
