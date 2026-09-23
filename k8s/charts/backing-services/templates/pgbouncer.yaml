@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgbouncer
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+    spec:
+      # Stateless proxy -- no PVC. Waits for Postgres itself the same way
+      # nest-service's own deployment.yaml waits for its dependencies,
+      # rather than relying on CrashLoopBackOff retries for something that's
+      # very likely to already be up (Postgres is a StatefulSet applied
+      # before this chart's other resources) but isn't guaranteed to be.
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z -w2 postgres 5432; do
+                echo "waiting for postgres:5432..."
+                sleep 2
+              done
+      containers:
+        - name: pgbouncer
+          # Fully-qualified for the same reason as postgres/rabbitmq/redis
+          # above -- CRI-O's short-name enforcement on OKE.
+          image: {{ .Values.pgbouncer.image }}
+          ports:
+            - name: pgbouncer
+              containerPort: 6432
+          env:
+            - name: DB_HOST
+              value: postgres
+            - name: DB_PORT
+              value: "5432"
+            # There's only one Postgres role in this whole system (postgres,
+            # superuser) -- every one of the 9 logical databases is owned by
+            # it, and every nest-service connects as it (see nest-service's
+            # deployment.yaml DATABASE_URL). auth_user's default auth_query
+            # reads pg_shadow, which requires superuser -- true here, so no
+            # extra auth_query config is needed.
+            - name: DB_USER
+              value: postgres
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: POSTGRES_PASSWORD
+            # DB_NAME intentionally unset -- the image defaults it to "*",
+            # a wildcard [databases] entry that forwards whatever dbname the
+            # client asked for straight to Postgres. That's exactly what's
+            # needed for 9 separate logical databases on one instance.
+            - name: POOL_MODE
+              value: {{ .Values.pgbouncer.poolMode | quote }}
+            - name: MAX_CLIENT_CONN
+              value: {{ .Values.pgbouncer.maxClientConn | quote }}
+            - name: DEFAULT_POOL_SIZE
+              value: {{ .Values.pgbouncer.defaultPoolSize | quote }}
+            # Matches Postgres 16's own default password_encryption setting.
+            - name: AUTH_TYPE
+              value: scram-sha-256
+          resources:
+            {{- toYaml .Values.pgbouncer.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: pgbouncer
+  ports:
+    - name: pgbouncer
+      port: 6432
+      targetPort: 6432

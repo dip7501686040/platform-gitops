@@ -26,6 +26,27 @@ postgres:
       cpu: 500m
       memory: 768Mi
 
+pgbouncer:
+  image: docker.io/edoburu/pgbouncer:v1.24.1-p1
+  # Transaction pooling: a backend connection is only held for the
+  # duration of one transaction, then returned to the pool for the next
+  # client -- this is what actually decouples "replica count" from
+  # "Postgres connection count". Session pooling wouldn't (one backend
+  # connection per active client connection, same ceiling as today).
+  poolMode: transaction
+  # Postgres's own max_connections is 100 (image default, unchanged) --
+  # this stays comfortably under it even with every one of the 9
+  # services' pools active at once.
+  defaultPoolSize: 20
+  maxClientConn: 1000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
 rabbitmq:
   image: docker.io/library/rabbitmq:3-management-alpine
   user: notification

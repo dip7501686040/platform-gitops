@@ -69,8 +69,14 @@ spec:
             - secretRef:
                 name: app-secrets
           env:
+            # Deliberately NOT .Values.postgresHost/postgresPort (PgBouncer,
+            # transaction pooling) -- `prisma migrate deploy` takes a
+            # session-scoped Postgres advisory lock for the duration of the
+            # migration, which transaction pooling breaks (the lock/unlock
+            # can land on two different backend connections). Migrations
+            # always go straight to Postgres.
             - name: DATABASE_URL
-              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@{{ .Values.postgresHost }}:5432/{{ .Values.database.name }}"
+              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@postgres:5432/{{ .Values.database.name }}"
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { cpu: 250m, memory: 256Mi }

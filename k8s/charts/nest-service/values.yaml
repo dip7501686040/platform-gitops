@@ -34,7 +34,15 @@ database:
   enabled: false
   name: ""
 
-postgresHost: postgres
+# Points at PgBouncer (backing-services' pgbouncer.yaml), not Postgres
+# directly -- transaction-pooled, so replica count no longer multiplies
+# 1:1 against Postgres's own connection ceiling. The migrate Job below
+# deliberately bypasses this and talks to Postgres directly: `prisma
+# migrate deploy` takes a session-scoped Postgres advisory lock, which
+# transaction pooling breaks (the lock and the unlock can land on two
+# different pooled backend connections).
+postgresHost: pgbouncer
+postgresPort: 6432
 
 # Almost every nest-service publishes/consumes over RabbitMQ (see
 # packages/rabbitmq/src/rabbitmq.service.ts's consume(), used pervasively --

@@ -50,8 +50,8 @@ spec:
             - sh
             - -c
             - |
-              until nc -z -w2 {{ .Values.postgresHost }} 5432; do
-                echo "waiting for {{ .Values.postgresHost }}:5432..."
+              until nc -z -w2 {{ .Values.postgresHost }} {{ .Values.postgresPort }}; do
+                echo "waiting for {{ .Values.postgresHost }}:{{ .Values.postgresPort }}..."
                 sleep 2
               done
         {{- end }}
@@ -91,7 +91,11 @@ spec:
             {{- end }}
             {{- if .Values.database.enabled }}
             - name: DATABASE_URL
-              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@{{ .Values.postgresHost }}:5432/{{ .Values.database.name }}"
+              # pgbouncer=true disables Prisma's prepared-statement cache --
+              # required in transaction-pooling mode, where a prepared
+              # statement from one pooled backend connection may not exist
+              # on whichever connection the next query gets assigned to.
+              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@{{ .Values.postgresHost }}:{{ .Values.postgresPort }}/{{ .Values.database.name }}?pgbouncer=true"
             {{- end }}
             {{- if .Values.metrics.enabled }}
             - name: METRICS_PROMETHEUS_PORT
