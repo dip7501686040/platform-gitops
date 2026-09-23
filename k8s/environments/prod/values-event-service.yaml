@@ -2,7 +2,7 @@ image:
   # TODO: replace with the real ECR URL once real-AWS Terraform is applied
   # (see terraform outputs.ecr_repository_urls).
   repository: docker.io/dip75016860/ai-notification
-  tag: "event-service-0eabe1bb"
+  tag: "event-service-0cc64eb8"
 
 healthGrpcPort: 50054
 appGrpcPort: 50154
