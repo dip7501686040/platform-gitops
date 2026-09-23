@@ -42,6 +42,16 @@ spec:
               value: postgres
             - name: DB_PORT
               value: "5432"
+            # LISTEN_PORT, not DB_PORT, controls what PgBouncer itself
+            # binds to -- the two are unrelated in this image. Confirmed
+            # live: without this, the container listens on 5432 (its own
+            # default, not derived from DB_PORT despite them coincidentally
+            # having been the same value here), while the Service/Deployment
+            # ports below and every nest-service's postgresPort expect 6432
+            # -- readiness/liveness probes on 6432 failed with "connection
+            # refused" and the pod crash-looped.
+            - name: LISTEN_PORT
+              value: "6432"
             # There's only one Postgres role in this whole system (postgres,
             # superuser) -- every one of the 9 logical databases is owned by
             # it, and every nest-service connects as it (see nest-service's
